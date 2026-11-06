@@ -465,14 +465,19 @@ fn response_head<R: Read>(reader: &mut BufReader<R>) -> Result<(u16, Vec<(String
 }
 /// The request headers every proxied call carries.
 fn upstream_headers(head: &mut String, req: &http::Request, names: &[&str]) -> Result<(), Failure> {
+    let mut sent=std::collections::BTreeSet::new();
     for name in names {
-        if let Some(value) = req.header(name) {
+        let canonical=name.to_ascii_lowercase();
+        if !sent.insert(canonical.clone()) {continue;}
+        // Deduplicate the allowlist, not the input: genuine duplicate values must remain detectable upstream.
+        for (_,value) in req.headers.iter().filter(|(incoming,_)|incoming.eq_ignore_ascii_case(&canonical)) {
             if value.len() > 8192 || value.chars().any(char::is_control) {
                 return Err(Failure(400, "request-header"));
             }
-            head.push_str(&format!("{name}: {value}\r\n"));
+            head.push_str(&format!("{canonical}: {value}\r\n"));
         }
     }
+    if req.path == "/_brain/vitals" { return Ok(()) }
     let auth = cookie(req.header("cookie").unwrap_or(""))?;
     if !auth.is_empty() {
         head.push_str(&format!("Cookie: {auth}\r\n"));
@@ -562,8 +567,10 @@ fn fetch_with(
     let _permit = Permit::acquire().ok_or(Failure(503, "request-capacity"))?;
     // Native image/GCS handlers have a thirty-second deadline; preserve their completed result through the edge.
     let resource_path = req.path.split('?').next().unwrap_or("");
+    let vitals = resource_path == "/_brain/vitals";
+    if vitals && req.body.len() > 4096 { return Err(Failure(413, "vitals-body-budget")) }
     let media = resource_path == "/_brain/uploads" || resource_path.starts_with("/_brain/uploads/");
-    let end = Instant::now() + Duration::from_secs(if media || route.is_some() { 35 } else { 10 });
+    let end = Instant::now() + Duration::from_secs(if vitals { 5 } else if media || route.is_some() { 35 } else { 10 });
     let socket = TcpStream::connect_timeout(&target.address, Duration::from_secs(2))
         .map_err(|_| Failure(503, "backend-unavailable"))?;
     let mut stream = Deadline { socket, end };
@@ -573,18 +580,19 @@ fn fetch_with(
     } else {
         format!("{path}?{}", req.query)
     };
+    let request_id = if vitals { String::new() } else { format!("X-Request-Id: {}\r\n",req.id) };
     let mut headers = format!(
-        "{} {path} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nAccept-Encoding: identity\r\nX-Request-Id: {}\r\nContent-Length: {}\r\n",
+        "{} {path} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nAccept-Encoding: identity\r\n{request_id}Content-Length: {}\r\n",
         req.method,
         target.host,
-        req.id,
         req.body.len()
     );
-    if let Some(client) = client {
+    if let Some(client) = client.filter(|_| !vitals) {
         headers.push_str(&format!("x-forwarded-for: {client}\r\n"));
     }
     let declared = route.map(|route| route.headers.iter().map(String::as_str).collect::<Vec<_>>()).unwrap_or_default();
-    upstream_headers(&mut headers, req, &[&REQUEST_HEADERS[..], &declared[..]].concat())?;
+    if vitals { upstream_headers(&mut headers, req, &["origin", "content-type", "dnt", "sec-gpc"])?; }
+    else { upstream_headers(&mut headers, req, &[&REQUEST_HEADERS[..], &declared[..]].concat())?; }
     headers.push_str("\r\n");
     stream
         .write_all(headers.as_bytes())
@@ -689,7 +697,7 @@ fn fetch_with(
     let mut response_headers = vec![("X-Request-Id".into(), req.id.clone())];
     for (name, value) in raw_headers {
         let allowed = if name == "set-cookie" {
-            auth_cookie_reply(&value)
+            !vitals && auth_cookie_reply(&value)
         } else {
             RESPONSE_HEADERS.contains(&name.as_str())
                 // the response headers a route contract allows its handler to set (docs/backend/routes.md)
@@ -956,6 +964,27 @@ mod tests {
         assert!(!handles("/views/home.brain"));
     }
     #[test]
+    fn declared_and_common_header_lists_do_not_fabricate_duplicates_or_hide_real_ones() {
+        let (target,server)=authority(b"HTTP/1.1 202 Accepted\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}".to_vec());
+        let mut req=request("POST");req.path="/events/custom".into();req.query.clear();req.body=vec![0,255,128,13,10];
+        req.headers.extend([("Content-Type".into(),"application/octet-stream".into()),("x-event-signature".into(),"signed-exact-bytes".into())]);
+        let route=NativeRoute{path:req.path.clone(),headers:vec!["Content-Type".into(),"content-type".into(),"X-Event-Signature".into(),"x-event-signature".into()]};
+        assert_eq!(fetch_with(&target,&req,None,Some(&route)).unwrap().0,202);
+        let received=server.join().unwrap();
+        assert_eq!(received.body,req.body);
+        assert_eq!(received.headers.iter().filter(|(name,_)|name=="content-type").count(),1);
+        assert_eq!(received.headers.iter().filter(|(name,_)|name=="x-event-signature").count(),1);
+        req.headers.push(("X-Event-Signature".into(),"different-signature".into()));
+        req.headers.push(("content-type".into(),"text/plain".into()));
+        let mut head="POST /events/custom HTTP/1.1\r\n".to_string();
+        upstream_headers(&mut head,&req,&["content-type","Content-Type","x-event-signature","X-Event-Signature"]).unwrap();
+        assert_eq!(head.matches("content-type:").count(),2,"genuine incoming duplicates are never collapsed to a trusted first value");
+        assert_eq!(head.matches("x-event-signature:").count(),2);
+        head.push_str("Content-Length: 0\r\n\r\n");
+        assert!(http::read_request(head.as_bytes()).is_err(),"strict upstream parsing still rejects genuinely ambiguous headers");
+    }
+
+    #[test]
     fn signed_provider_transport_preserves_raw_body_and_only_declared_signature_headers() {
         let (target,server)=authority(b"HTTP/1.1 202 Accepted\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}".to_vec());
         let mut req = request("POST");
@@ -983,6 +1012,16 @@ mod tests {
             assert_eq!(received.header(name), req.header(name));
         }
         assert!(received.header("x-brain-webhook-extra").is_none());
+    }
+    #[test]
+    fn native_vitals_transport_drops_all_identity_and_response_cookies() {
+        let (target,server)=authority(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nSet-Cookie: __Host-brain=synthetic; Path=/; Secure; HttpOnly\r\nConnection: close\r\n\r\n".to_vec());
+        let mut req=request("POST");req.path="/_brain/vitals".into();req.query.clear();req.body=br#"{"route":"/","consent":true,"metrics":[{"name":"TTFB","value":42}]}"#.to_vec();
+        for (key,value) in [("authorization","Bearer unrelated"),("user-agent","private-agent"),("referer","https://private.example.test/path"),("dnt","1"),("sec-gpc","1")] { req.headers.push((key.into(),value.into())); }
+        let result=fetch_with(&target,&req,Some("203.0.113.1"),None).unwrap();assert_eq!(result.0,204);assert!(!result.2.iter().any(|(key,_)| key=="set-cookie"));
+        let received=server.join().unwrap();
+        for key in ["authorization","x-api-key","cookie","user-agent","referer","x-forwarded-for","x-request-id","cf-ipcountry"] { assert!(received.header(key).is_none(),"{key}"); }
+        assert_eq!(received.header("origin"),req.header("origin"));assert_eq!(received.header("dnt"),Some("1"));assert_eq!(received.header("sec-gpc"),Some("1"));assert_eq!(received.body,req.body);
     }
     #[test]
     fn analytics_beacons_forward_only_the_privacy_and_bot_filter_headers() {

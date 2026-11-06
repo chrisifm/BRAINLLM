@@ -80,6 +80,8 @@ pub struct Organization {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
+    /// Canonical frontend routes and their bounded raw-segment constraints.
+    pub route_params: brain_lex::param_pattern::RouteParams,
     /// Absolute origin without trailing slash (`--site`).
     pub site: Option<String>,
     pub name: Option<String>,
@@ -95,6 +97,7 @@ pub struct Config {
     pub manifest: bool,
     pub manifest_cfg: Manifest,
     pub google: Google,
+    pub google_bridge: crate::google::Bridge,
     pub organization: Option<Organization>,
     /// Site search URL template with `{query}` (`/search?q={query}`).
     pub search: Option<String>,
@@ -129,6 +132,7 @@ pub struct Config {
     /// `seo.credit`: the "By BRAINLLM <version>" line at the bottom of every page (default true).
     pub credit: bool,
     pub compiler_branding: bool,
+    pub compiler_branding_assets: bool,
     /// `seo.feed`: site-wide `rss.xml` and `<section>/rss.xml` (default true).
     pub feed: bool,
     /// `seo.sections`: `sections.json`, the manifest of every section (default true).
@@ -153,7 +157,9 @@ impl Default for Config {
             llms_full: true,
             manifest: true,
             manifest_cfg: Manifest::default(),
+            route_params: Default::default(),
             google: Google::default(),
+            google_bridge: crate::google::Bridge::default(),
             organization: None,
             search: None,
             per_page: 10,
@@ -172,6 +178,7 @@ impl Default for Config {
             server_pages: vec![],
             credit: true,
             compiler_branding: true,
+            compiler_branding_assets: true,
             feed: true,
             sections: true,
             redirect_policy: crate::redirects::Policy::default(),
@@ -245,11 +252,27 @@ pub fn origin(site: &str) -> Result<String, String> {
 }
 
 impl Config {
+    /// Restrict dynamic URL validation with the same raw-segment contract as the frontend route table.
+    pub fn route_allows(&self,route:&str,path:&str)->bool {
+        if self.route_params.contains_key(route) {return brain_lex::param_pattern::allows(route,path,&self.route_params);}
+        for locale in &self.locales {
+            let prefix=format!("/{locale}/");
+            if let (Some(r),Some(p))=(route.strip_prefix(&prefix),path.strip_prefix(&prefix)) {
+                return brain_lex::param_pattern::allows(&format!("/{r}"),&format!("/{p}"),&self.route_params);
+            }
+        }
+        true
+    }
+
     /// Reads the SEO-relevant keys of a parsed `brain.json`. Unknown keys are ignored (other modules own them).
     pub fn from_json(j: &Json) -> Result<Config, String> {
+        crate::google::validate_config_google(j)?;
         let compiler_branding=brain_lex::branding::enabled(j)?;
+        let compiler_branding_assets=brain_lex::branding::asset_comments(j)?;
         let mut c = Config {
+            route_params: brain_lex::param_pattern::from_config(j)?,
             compiler_branding,
+            compiler_branding_assets,
             site: s(j, "site").map(|v| origin(&v)).transpose()?,
             name: s(j, "name"),
             description: s(j, "description"),
@@ -508,6 +531,7 @@ impl Config {
             };
         }
         if let Some(g) = j.get("google") {
+            c.google_bridge = crate::google::parse(g)?;
             c.google = Google {
                 analytics: tag_id(s(g, "analytics"), "G-", "analytics")?,
                 tag_manager: tag_id(s(g, "tagManager"), "GTM-", "tagManager")?,
@@ -545,6 +569,7 @@ impl Config {
         if env != "production" {
             self.staging = true;
         }
+        self.google_bridge = self.google_bridge.select(env);
         self.indexnow_key = if self.indexnow {
             env_value(root, env, "INDEXNOW_KEY")
         } else {

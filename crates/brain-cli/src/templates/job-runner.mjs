@@ -73,7 +73,8 @@ function frames(error, budget) {
 function backendFailure(error) {
   try {
     if (error?.[Symbol.for('brain.backendError')] !== true) return null
-    const fields = error.errors && typeof error.errors === 'object' ? Object.entries(error.errors).slice(0, 16).filter(([, text]) => typeof text === 'string').map(([name, text]) => [name.slice(0, 64), text.slice(0, 160)]) : []
+    const details = error.errors ?? error.fields
+    const fields = details && typeof details === 'object' ? Object.entries(details).slice(0, 16).filter(([, text]) => typeof text === 'string').map(([name, text]) => [name.slice(0, 64), text.slice(0, 160)]) : []
     return { status: error.status, code: error.code ?? null, fields: Object.fromEntries(fields) }
   } catch { return null }
 }
@@ -98,7 +99,8 @@ function observe(error, path) {
   caught.count++
   const [, area, name] = /^\/(?:api|_brain\/(files|operations))\/([a-z][a-z0-9_]{0,47})(?:[/?]|$)/.exec(String(path)) || []
   const target = name ? (area === 'files' ? 'files.' : area === 'operations' ? 'operation.' : '') + name : null
-  const fields = error.errors && typeof error.errors === 'object' ? Object.keys(error.errors).slice(0, 8).map(field => field.slice(0, 64)) : []
+  const details = error.errors ?? error.fields
+  const fields = details && typeof details === 'object' ? Object.keys(details).slice(0, 8).map(field => field.slice(0, 64)) : []
   const entry = { status: error.status, code: error.code ?? null, target, fields }
   const same = caught.failures.find(f => f.status === entry.status && f.code === entry.code && f.target === entry.target && f.fields.join() === entry.fields.join())
   if (same) same.count++

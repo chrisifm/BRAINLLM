@@ -1,0 +1,27 @@
+{
+  "id": "native-document-vitals",
+  "kind": "capability",
+  "title": "Independent anonymous document-performance aggregates",
+  "why": "An explicit production Node/native collector stores daily declared-pattern/metric aggregates, not visitors or raw URLs. Shared quota, atomic capacity, lazy retention and read-only reports expose statistical limitations.",
+  "changelog": [
+    "Native field-vitals aggregates are independent of behavior analytics"
+  ],
+  "guide": "docs/backend/vitals.md",
+  "apis": [
+    "vitals.enabled",
+    "brain vitals report"
+  ],
+  "affects": [
+    "brain.json"
+  ],
+  "adopt": {
+    "file": "brain.json",
+    "snippet": "{\"vitals\":{\"enabled\":true,\"routes\":[\"/\",\"/items/:id\"],\"retentionDays\":30}}"
+  },
+  "uses": [
+    {
+      "glob": "brain.json",
+      "contains": "\"vitals\""
+    }
+  ]
+}

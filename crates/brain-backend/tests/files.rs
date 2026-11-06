@@ -101,6 +101,7 @@ async fn declared_buckets_stream_any_type_enforce_policy_and_serve_ranges() {
     let (http, _) = brain_backend::http::router_with_platform(
         pool.clone(),
         brain_backend::Config {
+        vitals: None,
         api_keys: None,
             roles,
             mail: None,
@@ -114,7 +115,7 @@ async fn declared_buckets_stream_any_type_enforce_policy_and_serve_ranges() {
             origins: vec![ORIGIN.into()],
             production: true,
             jwt: None,
-            google: None, apple: None, linkedin: None,
+            google: None, apple: None, apple_native: None, linkedin: None,
             gcs: None,
         },
         Platform { buckets: vec![invoices, attachments, banners], ..Default::default() },
@@ -255,7 +256,8 @@ async fn a_failed_file_delete_leaves_a_tombstone_the_sweep_finishes() {
     let (http, _) = brain_backend::http::router_with_platform(
         pool.clone(),
         brain_backend::Config {
-            api_keys: None,
+            vitals: None,
+        api_keys: None,
             roles,
             mail: None,
             auth_public_base_url: None,
@@ -268,7 +270,7 @@ async fn a_failed_file_delete_leaves_a_tombstone_the_sweep_finishes() {
             origins: vec![ORIGIN.into()],
             production: true,
             jwt: None,
-            google: None, apple: None, linkedin: None,
+            google: None, apple: None, apple_native: None, linkedin: None,
             gcs: None,
         },
         Platform { buckets: vec![docs], ..Default::default() },

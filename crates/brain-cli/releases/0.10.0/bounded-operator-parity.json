@@ -1,0 +1,23 @@
+{
+  "id": "bounded-operator-parity",
+  "kind": "fix",
+  "title": "Bounded operator CLI and MCP parity",
+  "why": "New operator tools retain exact CLI reports and apply confirmation through owned current-app children. HTTP clients share four native DNS leases across MCP calls and bounded teardown; Sentry close also cancels admitted partial bodies.",
+  "changelog": [
+    "Operator MCP parity preserves CLI verdicts and bounded child ownership"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "apis": [
+    "brain_db_audit",
+    "brain_backend_conform",
+    "brain_google_setup",
+    "brain_seo_diff",
+    "brain_vitals_report",
+    "brain_data_backfill",
+    "brain_edge"
+  ],
+  "affects": [
+    "brain.json",
+    "server/**"
+  ]
+}

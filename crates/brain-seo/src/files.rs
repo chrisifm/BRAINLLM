@@ -610,6 +610,15 @@ pub fn google_tags(cfg: &Config) -> GoogleTags {
             "<meta name=\"google-site-verification\" content=\"{v}\">"
         ));
     }
+    if cfg.google_bridge.enabled {
+        let Some(js) = crate::google::bootstrap(&cfg.google_bridge) else {
+            return GoogleTags { head, file: None, csp: vec![] };
+        };
+        let js = brain_lex::branding::code_with(&js, cfg.compiler_branding_assets);
+        let path = format!("_b/g.{}.js", hash(&js));
+        head.push_str(&format!("<script type=\"module\" src=\"/{path}\"></script>"));
+        return GoogleTags { head, file: Some((path, js)), csp: crate::google::CSP.to_vec() };
+    }
     if g.analytics.is_none() && g.tag_manager.is_none() {
         return GoogleTags {
             head,
@@ -628,7 +637,7 @@ gtag('consent','default',{ad_storage:'denied',ad_user_data:'denied',ad_personali
         js.push_str("dataLayer.push({'gtm.start':new Date().getTime(),event:'gtm.js'});");
     }
     js.push('\n');
-    let js=brain_lex::branding::code_with(&js,cfg.compiler_branding);
+    let js=brain_lex::branding::code_with(&js,cfg.compiler_branding_assets);
     let path = format!("_b/g.{}.js", hash(&js));
     head.push_str(&format!("<script src=\"/{path}\"></script>"));
     if let Some(id) = &g.analytics {

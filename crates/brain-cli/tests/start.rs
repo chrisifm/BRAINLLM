@@ -142,10 +142,11 @@ fn killed_child_is_back_within_a_second_and_reload_drops_nothing() {
     if let Ok(src) = std::fs::read_to_string(&real) {
         // lay out the server exactly as brain-pack emits it: helper under _server/ and the import rewritten to it
         let helper = real.with_file_name("native-sockets.mjs");
-        std::fs::write(dir.join("dist/server.mjs"), src.replace("from './native-sockets.mjs'", "from './_server/native-sockets.mjs'").replace("from './llm.mjs'", "from './_server/llm.mjs'")).unwrap();
+        std::fs::write(dir.join("dist/server.mjs"), src.replace("from './native-sockets.mjs'", "from './_server/native-sockets.mjs'").replace("from './llm.mjs'", "from './_server/llm.mjs'").replace("from './redis-cache.mjs'", "from './_server/redis-cache.mjs'")).unwrap();
         std::fs::create_dir_all(dir.join("dist/_server")).unwrap();
         std::fs::copy(helper, dir.join("dist/_server/native-sockets.mjs")).unwrap();
         std::fs::copy(real.with_file_name("llm.mjs"), dir.join("dist/_server/llm.mjs")).unwrap();
+        std::fs::copy(real.with_file_name("redis-cache.mjs"), dir.join("dist/_server/redis-cache.mjs")).unwrap();
         std::fs::write(dir.join("dist/_server/manifest.json"), "{\"v\":1,\"build\":\"sig12345\",\"routes\":[],\"rpc\":{}}").unwrap();
     }
     let (mut c, p) = start(&dir, &[]);
@@ -475,4 +476,119 @@ fn a_temporary_load_failure_is_a_503_with_retry_after() {
     assert!(broken.starts_with("HTTP/1.1 500") && !broken.to_lowercase().contains("retry-after"), "{broken}");
     assert!(get(port, "/items/ok", html).unwrap().starts_with("HTTP/1.1 200"));
     let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn opt_in_warmup_signal_failures_stop_after_three_pre_ready_attempts() {
+    if !node() { return; }
+    let dir=app("warmup-bounded-start",true);
+    std::fs::create_dir_all(dir.join("dist/_server")).unwrap();
+    std::fs::write(dir.join("dist/_server/manifest.json"),r#"{"server":{"warmup":{"paths":["/data"],"timeoutMs":8000}}}"#).unwrap();
+    std::fs::write(dir.join("dist/server.mjs"),"import {appendFileSync} from 'node:fs'\nappendFileSync('attempts','x')\nprocess.kill(process.pid,'SIGKILL')\n").unwrap();
+    let (mut child,_)=start(&dir,&[]);
+    let deadline=Instant::now()+Duration::from_secs(10);
+    let status=loop {
+        if let Some(status)=child.try_wait().unwrap(){break status}
+        assert!(Instant::now()<deadline,"warmup startup retries exceeded their finite bound");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(status.code(),Some(1));
+    assert_eq!(std::fs::read(dir.join("dist/attempts")).unwrap().len(),3);
+    let mut stderr=String::new(); child.stderr.take().unwrap().read_to_string(&mut stderr).unwrap();
+    assert!(stderr.contains("three consecutive times before readiness"),"{stderr}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+fn install_data_warmup_runtime(dir: &std::path::Path) -> std::path::PathBuf {
+    let runtime=std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime");
+    let source=std::fs::read_to_string(runtime.join("server/server.mjs")).unwrap();
+    let source=source.replace("from './native-sockets.mjs'","from './_server/native-sockets.mjs'")
+        .replace("from './llm.mjs'","from './_server/llm.mjs'")
+        .replace("from './redis-cache.mjs'","from './_server/redis-cache.mjs'")
+        .replace("import('./warmup.mjs')","import('./_server/warmup.mjs')");
+    std::fs::create_dir_all(dir.join("dist/_server")).unwrap();
+    std::fs::write(dir.join("dist/server.mjs"),source).unwrap();
+    for helper in ["native-sockets.mjs","llm.mjs","redis-cache.mjs","warmup.mjs","warmup-watchdog.mjs"] {
+        std::fs::copy(runtime.join("server").join(helper),dir.join("dist/_server").join(helper)).unwrap();
+    }
+    std::fs::copy(runtime.join("shim/dom.js"),dir.join("dist/_server/dom.js")).unwrap();
+    std::fs::copy(runtime.join("brain.js"),dir.join("dist/_b/brain.js")).unwrap();
+    std::fs::write(dir.join("dist/_b/view.js"),"import {tpl} from '/_b/brain.js'\nexport default function View(p){return tpl('<p>read '+p.n+'</p>')()}\n").unwrap();
+    std::fs::write(dir.join("dist/_server/page.html"),"<!doctype html><html><head></head><body><div id=\"brain-view\"><!--brain:ssr--></div><script type=\"application/json\" id=\"brain-props\"><!--brain:props--></script></body></html>").unwrap();
+    let marks=dir.join("dist/reads");
+    let code=format!("import {{appendFileSync}} from 'node:fs'\nlet count=0; export function load(){{appendFileSync({},'x');return {{n:++count}}}}\n",serde_json::to_string(&marks.to_string_lossy()).unwrap());
+    std::fs::write(dir.join("dist/_server/data.mjs"),code).unwrap();
+    std::fs::write(dir.join("dist/_server/manifest.json"),r#"{"v":1,"build":"warmup-fixture","site":"http://localhost","core":"/_b/brain.js","rpc":{},"server":{"warmup":{"paths":["/data"],"timeoutMs":1000,"onError":"abort"}},"routes":[{"path":"/data","rx":"^/data/?$","server":"_server/data.mjs","view":"/_b/view.js","layouts":[],"guards":[],"middleware":[],"page":"_server/page.html","cache":60}]}"#).unwrap();
+    marks
+}
+
+#[test]
+fn data_warmup_repeats_on_supervised_restart_reload_and_keeps_old_on_fatal_reload() {
+    if !node() { return; }
+    let dir=app("warmup-lifecycle",true);
+    let marks=install_data_warmup_runtime(&dir);
+    let (mut child,port)=start(&dir,&[]);
+    assert!(wait_up(port));
+    let wait_count=|expected| {
+        let until=Instant::now()+Duration::from_secs(10);
+        while Instant::now()<until {
+            if std::fs::read(&marks).is_ok_and(|bytes|bytes.len()>=expected){return}
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        panic!("data warmup did not run for the replacement instance");
+    };
+    wait_count(1);
+    let status:serde_json::Value=serde_json::from_str(&brain(&dir,&["status","--json"])).unwrap();
+    let pid=status["instances"][0]["pid"].as_u64().unwrap();
+    Command::new("kill").args(["-KILL",&pid.to_string()]).status().unwrap();
+    wait_count(2); assert!(wait_up(port));
+    let reload=Command::new(env!("CARGO_BIN_EXE_brain")).arg("reload").current_dir(&dir).stdin(Stdio::null()).output().unwrap();
+    assert!(reload.status.success(),"{}",String::from_utf8_lossy(&reload.stdout));wait_count(3);
+    std::fs::write(dir.join("dist/_server/data.mjs"),"export function load(){throw new Error('synthetic replacement failure')}\n").unwrap();
+    let failed=Command::new(env!("CARGO_BIN_EXE_brain")).arg("reload").current_dir(&dir).stdin(Stdio::null()).output().unwrap();
+    assert_eq!(failed.status.code(),Some(1));
+    assert!(get(port,"/_health","").unwrap().starts_with("HTTP/1.1 200"),"old worker stays live after a fatal warmup replacement");
+    brain(&dir,&["stop"]);assert!(child.wait().unwrap().success());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn data_warmup_build_emits_private_helpers_and_rejects_static_output() {
+    if !node() { return; }
+    let dir=app("warmup-build",false);
+    std::fs::create_dir_all(dir.join("views")).unwrap();
+    std::fs::write(dir.join("tokens.cssbrain"),":root {}\n").unwrap();
+    std::fs::write(dir.join("brain.json"),r#"{"name":"startup-fixture","site":"http://localhost","server":{"warmup":{"paths":["/data"],"timeoutMs":1000,"onError":"abort"}}}"#).unwrap();
+    std::fs::write(dir.join("views/data.brain"),"<meta seo title=\"Public data\" description=\"A synthetic public data view for startup verification.\" keyword=\"public data\" canonical=\"/data\">\n<meta cache=\"60\">\n<script>export async function load() { return { n: 1 } }</script>\n<main><h1>Public data</h1><p>{props.n}</p></main>\n").unwrap();
+    let output=Command::new(env!("CARGO_BIN_EXE_brain")).arg("build").current_dir(&dir).stdin(Stdio::null()).output().unwrap();
+    assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stderr));
+    assert!(dir.join("dist/_server/warmup.mjs").is_file());
+    assert!(dir.join("dist/_server/warmup-watchdog.mjs").is_file());
+    let source=std::fs::read_to_string(dir.join("dist/server.mjs")).unwrap();
+    assert!(source.contains("import('./_server/warmup.mjs')"));
+    let manifest:serde_json::Value=serde_json::from_str(&std::fs::read_to_string(dir.join("dist/_server/manifest.json")).unwrap()).unwrap();
+    assert_eq!(manifest["server"]["warmup"]["paths"][0],"/data");
+    assert_eq!(manifest["server"]["warmup"]["timeoutMs"],1000);
+    let rejected=Command::new(env!("CARGO_BIN_EXE_brain")).args(["build","--static"]).current_dir(&dir).stdin(Stdio::null()).output().unwrap();
+    assert!(!rejected.status.success());
+    let diagnostic=String::from_utf8_lossy(&rejected.stderr);assert!(diagnostic.contains("static"),"{diagnostic}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn data_warmup_watchdog_stops_a_real_startup_loop_after_three_attempts() {
+    if !node() { return; }
+    let dir=app("warmup-real-deadline",true);
+    let marks=install_data_warmup_runtime(&dir);
+    let code=format!("import {{appendFileSync}} from 'node:fs'\nexport function load(){{appendFileSync({},'x');while(true){{}}}}\n",serde_json::to_string(&marks.to_string_lossy()).unwrap());
+    std::fs::write(dir.join("dist/_server/data.mjs"),code).unwrap();
+    let (mut child,_)=start(&dir,&[]);
+    let until=Instant::now()+Duration::from_secs(8);
+    let status=loop {
+        if let Some(status)=child.try_wait().unwrap(){break status}
+        assert!(Instant::now()<until,"the real watchdog/startup cycle exceeded three attempts");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(status.code(),Some(1));assert_eq!(std::fs::read(marks).unwrap().len(),3);
+    std::fs::remove_dir_all(dir).unwrap();
 }

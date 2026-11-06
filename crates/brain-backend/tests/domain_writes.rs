@@ -54,6 +54,52 @@ fn metadata_input_domain() -> Domain {
 }
 
 #[test]
+fn system_only_operations_are_explicit_and_cannot_also_grant_roles() {
+    let mut source = fixture()["domain"].clone();
+    let operation = source["operations"]["place_order"].as_object_mut().unwrap();
+    operation.insert("systemOnly".into(), json!(true));
+    operation.remove("roles");
+    let domain: Domain = serde_json::from_value(source.clone()).unwrap();
+    domain.validate(&resources()).unwrap();
+    let mut api = json!({"paths":{}});
+    domain::openapi(&domain, &resources(), &mut api);
+    assert_eq!(api["paths"]["/_brain/operations/place_order"]["post"]["x-brain-system-only"], true);
+    assert_eq!(api["paths"]["/_brain/operations/place_order"]["post"]["x-brain-roles"], json!([]));
+    source["operations"]["place_order"]["roles"] = json!(["admin"]);
+    let mixed: Domain = serde_json::from_value(source.clone()).unwrap();
+    assert!(mixed.validate(&resources()).unwrap_err().contains("cannot also grant roles"));
+    source["operations"]["place_order"]["systemOnly"] = json!(false);
+    source["operations"]["place_order"]["roles"] = json!([]);
+    let empty: Domain = serde_json::from_value(source).unwrap();
+    assert!(empty.validate(&resources()).is_err(), "empty ordinary roles are not implicit system authority");
+}
+
+#[test]
+fn system_only_steps_cannot_acquire_authority_from_an_ordinary_operation() {
+    let mut source = fixture()["domain"].clone();
+    source["resources"]["shop_products"]["actions"]["system_rename"] = json!({"systemOnly":true,"set":{"name":"Managed"}});
+    let transition = source["resources"]["shop_orders"]["transitions"]["transitions"]["pay"].as_object_mut().unwrap();
+    transition.insert("systemOnly".into(), json!(true));
+    transition.remove("roles");
+    let valid: Domain = serde_json::from_value(source.clone()).unwrap();
+    valid.validate(&resources()).unwrap();
+    let mut api = json!({"paths":{}});
+    domain::openapi(&valid,&resources(),&mut api);
+    assert_eq!(api["paths"]["/api/shop_products/{id}/actions/system_rename"]["post"]["x-brain-system-only"],true);
+    assert_eq!(api["paths"]["/api/shop_orders/{id}/transitions/pay"]["post"]["x-brain-system-only"],true);
+    for target in [json!({"action":"shop_products.system_rename"}), json!({"transition":"shop_orders.pay"})] {
+        let mut step = json!({"as":"record","id":"$input.id"});
+        json_patch(&mut step, &target);
+        source["operations"]["indirect"] = json!({"roles":["admin"],"input":{"id":"str!"},"steps":[step]});
+        let ordinary: Domain = serde_json::from_value(source.clone()).unwrap();
+        assert!(ordinary.validate(&resources()).unwrap_err().contains("indirect role bypass"));
+        source["operations"]["indirect"]["systemOnly"] = json!(true);
+        source["operations"]["indirect"].as_object_mut().unwrap().remove("roles");
+        serde_json::from_value::<Domain>(source.clone()).unwrap().validate(&resources()).unwrap();
+    }
+}
+
+#[test]
 fn metadata_inputs_validate_across_actions_transitions_operations_and_openapi() {
     let domain = metadata_input_domain();
     let rs = resources();
@@ -193,6 +239,9 @@ async fn shop() -> Shop {
     shop_with_domain(shop_domain()).await
 }
 async fn shop_with_domain(domain: Domain) -> Shop {
+    shop_with_domain_and_keys(domain, false).await
+}
+async fn shop_with_domain_and_keys(domain: Domain, keys: bool) -> Shop {
     let url = std::env::var("BRAIN_BACKEND_TEST_URL")
         .expect("Use scripts/backend-check.mjs; no developer database is selected implicitly");
     // Own database: tests here hold row locks and add triggers, and a concurrent fixture's migration would wait on them.
@@ -216,7 +265,8 @@ async fn shop_with_domain(domain: Domain) -> Shop {
         tokens.push(token);
     }
     let config = brain_backend::Config {
-        api_keys: None,
+        vitals: None,
+        api_keys: keys.then(Default::default),
         roles: Default::default(),
         mail: None,
         auth_public_base_url: None,
@@ -225,7 +275,7 @@ async fn shop_with_domain(domain: Domain) -> Shop {
         sockets: None,
         gcs: None,
         jwt: None,
-        google: None, apple: None, linkedin: None,
+        google: None, apple: None, apple_native: None, linkedin: None,
         resources: resources(),
         jobs: Vec::new(),
         uploads: std::env::temp_dir().join(format!("brain-domain-test-{}", std::process::id())),
@@ -327,6 +377,44 @@ async fn stock(s: &Shop, product: &str) -> i64 {
 }
 async fn place(s: &Shop, token: &str, product: &str, quantity: i64) -> (u16, Value) {
     call(&s.app, "POST", "/_brain/operations/place_order", token, Some(json!({"product_id":product,"quantity":quantity}))).await
+}
+
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn postgres_system_only_transition_requires_a_scoped_system_key() {
+    let mut source = serde_json::to_value(shop_domain()).unwrap();
+    let transition = source["resources"]["shop_orders"]["transitions"]["transitions"]["pay"].as_object_mut().unwrap();
+    transition.insert("systemOnly".into(), json!(true));
+    transition.remove("roles");
+    source["operations"].as_object_mut().unwrap().remove("pay_order");
+    let s = shop_with_domain_and_keys(serde_json::from_value(source).unwrap(), true).await;
+    let product = id(&product(&s, "system-transition", json!({"stock":10,"status":"active"})).await);
+    let (status, placed) = place(&s, &s.alice, &product, 1).await;
+    assert_eq!(status, 200, "{placed}");
+    let order = id(&placed["result"]["order"]);
+    let path = format!("/api/shop_orders/{order}/transitions/pay");
+    for token in [&s.alice, &s.admin] {
+        let (status, body) = call(&s.app, "POST", &path, token, Some(json!({}))).await;
+        assert_eq!(status, 403, "{body}");
+    }
+    let auth = Auth::new(s.pool.clone()).await.unwrap();
+    let owner = auth.user(Some(&s.admin)).await.unwrap().unwrap().id;
+    let keys = brain_backend::api_keys::Keys::new(s.pool.clone(), Default::default()).unwrap();
+    let key = || brain_backend::api_keys::NewKey { name:"synthetic transition".into(),scopes:vec!["shop_orders:write".into()],expires_in_days:None,daily_quota:None,monthly_quota:None };
+    let (_, ordinary) = keys.create(owner, key()).await.unwrap().unwrap();
+    let (_, system) = keys.create_system(owner, key()).await.unwrap().unwrap();
+    for (key, wanted) in [(&ordinary,403),(&system,200)] {
+        let mut req = request("POST", &path, "", Some(json!({})));
+        req.headers_mut().remove("cookie");
+        req.headers_mut().remove("origin");
+        req.headers_mut().insert("x-api-key", key.parse().unwrap());
+        let response = s.app.clone().oneshot(req).await.unwrap();
+        let status = response.status().as_u16();
+        let body = to_bytes(response.into_body(),1<<20).await.unwrap();
+        assert_eq!(status,wanted,"{}",String::from_utf8_lossy(&body));
+    }
+    let state: String = sqlx::query_scalar("SELECT data->>'status' FROM _brain_res_shop_orders WHERE id=$1::uuid").bind(order).fetch_one(&s.pool).await.unwrap();
+    assert_eq!(state,"paid");
 }
 async fn orders_for(s: &Shop, product: &str) -> i64 {
     sqlx::query_scalar("SELECT count(*) FROM _brain_res_shop_orders WHERE data->>'product'=$1")
@@ -777,8 +865,9 @@ async fn postgres_patterns_state_locks_and_relational_actions_hold_on_every_writ
     let (resources, domain) = notice_contracts();
     db::migrate(&s.pool, &resources).await.unwrap();
     let config = brain_backend::Config {
+        vitals: None,
         api_keys: None, roles: Default::default(), mail: None, auth_public_base_url: None, webhooks: None, before_hooks: None, sockets: None,
-        gcs: None, jwt: None, google: None, apple: None, linkedin: None, resources, jobs: Vec::new(),
+        gcs: None, jwt: None, google: None, apple: None, apple_native: None, linkedin: None, resources, jobs: Vec::new(),
         uploads: std::env::temp_dir().join(format!("brain-notice-test-{}", std::process::id())),
         origins: vec!["http://localhost:5182".into()], production: true,
     };

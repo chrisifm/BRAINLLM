@@ -25,6 +25,7 @@ struct Executor {
     production: bool,
     budget: Duration,
     modules: BTreeMap<String, Arc<Compiled>>,
+    verifiers: BTreeMap<String, Arc<Compiled>>,
     pool: Arc<Mutex<Vec<Sidecar>>>,
     slots: Arc<tokio::sync::Semaphore>,
 }
@@ -96,12 +97,24 @@ pub fn secret_problems(root: &Path, environment: &str) -> Vec<SecretProblem> {
 pub fn handler_problems(root: &Path, routes: &[Route]) -> Vec<String> {
     routes
         .iter()
-        .filter_map(|route| {
-            let relative = format!("{ROUTES}/{}/handler.jsbrain", route.name);
-            let fix = "add `<meta server>` and `export default async function handle(ctx) { ... }` there";
-            crate::backend::source_problem(root, &relative, 256 * 1024, fix)
+        .flat_map(|route| {
+            let mut modules=vec!["handler"];
+            if route.verify.as_ref().is_some_and(brain_backend::routes::Verifier::is_custom) {modules.push("verify");}
+            modules.into_iter().filter_map(|name| {
+                let relative = format!("{ROUTES}/{}/{name}.jsbrain", route.name);
+                let fix = "add `<meta server>` and a callable async default export there";
+                crate::backend::source_problem(root, &relative, 256 * 1024, fix).or_else(|| {
+                    (name=="verify").then(|| verifier_metadata_problem(root,&relative)).flatten()
+                })
+            }).collect::<Vec<_>>()
         })
         .collect()
+}
+
+fn verifier_metadata_problem(root:&Path,relative:&str)->Option<String> {
+    let source=crate::map::read_source_limit(root,relative,256*1024).ok()?;
+    let parsed=brain_parse::parse(&source,Path::new(relative)).ok()?;
+    (!parsed.meta.iter().any(|meta|meta.name=="server")).then(||format!("{relative}: a custom verifier must be private server code; fix: add `<meta server>` before its default export"))
 }
 
 /// What a gateway needs to proxy each route: its path and the headers its contract reads. Signing secrets are not
@@ -114,7 +127,7 @@ pub fn gateway_routes(root: &Path) -> Result<Vec<(String, Vec<String>)>, String>
         .filter(|route| !hidden.contains(&route.name))
         .map(|route| {
             let mut headers = route.headers;
-            if let Some(verify) = route.verify {
+            if let Some(verify) = route.verify.filter(|verify|!verify.is_custom()) {
                 headers.push(verify.header);
             }
             headers.sort();
@@ -276,24 +289,33 @@ pub fn load(root: &Path, environment: &str, routes: &[Route]) -> Result<Option<H
     let vars = crate::env::select(root, environment);
     let budget = routes.iter().map(|r| r.timeout).max().unwrap_or(brain_backend::routes::DEFAULT_TIMEOUT);
     let mut modules = BTreeMap::new();
+    let mut verifiers = BTreeMap::new();
     for route in routes {
-        let relative = format!("{ROUTES}/{}/handler.jsbrain", route.name);
+        let mut entries=vec!["handler"];
+        if route.verify.as_ref().is_some_and(brain_backend::routes::Verifier::is_custom) {entries.push("verify");}
+        for entry in entries {
+        let relative = format!("{ROUTES}/{}/{entry}.jsbrain", route.name);
+        if entry=="verify" && let Some(problem)=verifier_metadata_problem(root,&relative) {return Err(problem);}
         crate::changes::source_path(root, &relative)?;
         crate::map::read_source_limit(root, &relative, 256 * 1024)
             .map_err(|reason| format!("{relative}: handler source refused: {reason}; run brain check"))?;
         let (scratch, module) = crate::backend::server_module(root, &relative)
             .map_err(|detail| if detail.contains("which the build did not emit") { detail } else { format!("{relative}: private handler compilation failed; run brain check for structured source diagnostics") })?;
-        modules.insert(route.name.clone(), Arc::new(Compiled { _scratch: scratch, module }));
+        let target=if entry=="verify" {&mut verifiers}else{&mut modules};
+        target.insert(route.name.clone(), Arc::new(Compiled { _scratch: scratch, module }));
+        }
     }
     let production = environment == "production";
     let mut pool = Vec::with_capacity(WORKERS);
     for _ in 0..WORKERS {
         pool.push(spawn(root, &vars, budget, production)?);
     }
-    for (name, compiled) in &modules {
+    for (entry, entries) in [("handler",&modules),("verify",&verifiers)] {
+    for (name, compiled) in entries {
         pool[0]
             .probe(&brain_serve::load::file_url(&compiled.module), "default")
-            .map_err(|(_, detail)| format!("{ROUTES}/{name}/handler.jsbrain: export default must be a callable handler(ctx): {}", brain_serve::load::failure_reason(&detail)))?;
+            .map_err(|(_, detail)| format!("{ROUTES}/{name}/{entry}.jsbrain: export default must be callable: {}", brain_serve::load::failure_reason(&detail)))?;
+    }
     }
     Ok(Some(Arc::new(Executor {
         root: root.to_path_buf(),
@@ -301,6 +323,7 @@ pub fn load(root: &Path, environment: &str, routes: &[Route]) -> Result<Option<H
         production,
         budget,
         modules,
+        verifiers,
         pool: Arc::new(Mutex::new(pool)),
         slots: Arc::new(tokio::sync::Semaphore::new(WORKERS)),
     })))
@@ -329,22 +352,24 @@ fn thrown(raw: &str) -> RouteFailure {
     }
 }
 
-impl RouteHandlers for Executor {
-    fn names(&self) -> Vec<String> {
-        self.modules.keys().cloned().collect()
-    }
-    fn run(&self, name: &str, context: Value, _timeout: Duration) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, RouteFailure>> + Send + '_>> {
+impl Executor {
+    fn execute(&self, name: &str, context: Value, timeout: Duration, verification: bool) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, RouteFailure>> + Send + '_>> {
         let name = name.to_owned();
+        let deadline=std::time::Instant::now()+timeout.min(self.budget);
         Box::pin(async move {
             let permit = self.slots.clone().try_acquire_owned().map_err(|_| RouteFailure::Capacity)?;
-            let compiled = self.modules.get(&name).ok_or(RouteFailure::Unavailable)?.clone();
+            let entries=if verification {&self.verifiers}else{&self.modules};
+            let compiled = entries.get(&name).ok_or(RouteFailure::Unavailable)?.clone();
             let (root, vars, production, budget, pool) = (self.root.clone(), self.vars.clone(), self.production, self.budget, self.pool.clone());
             let ctx = serde_json::to_string(&context).map_err(|_| RouteFailure::Unavailable)?;
             tokio::task::spawn_blocking(move || {
                 let _permit = permit;
+                if std::time::Instant::now()>=deadline {return Err(RouteFailure::Timeout);}
                 let mut sidecar = pool.lock().map_err(|_| RouteFailure::Unavailable)?.pop().ok_or(RouteFailure::Capacity)?;
-                let (result, reusable) = match sidecar.invoke(&brain_serve::load::file_url(&compiled.module), "default", &ctx, None) {
+                let (result, reusable) = match sidecar.invoke_route(&brain_serve::load::file_url(&compiled.module), "default", &ctx, deadline, verification) {
                     Ok(raw) => (serde_json::from_str::<Value>(&raw).map_err(|_| RouteFailure::Unavailable), true),
+                    Err((504, _)) => (Err(RouteFailure::Timeout),false),
+                    Err(_) if verification => (Err(RouteFailure::Unavailable),false),
                     Err((status, raw)) => match rejection(status, &raw) {
                         Some(failure) => (Err(failure), true),
                         None => (Err(thrown(&raw)), false),
@@ -367,6 +392,18 @@ impl RouteHandlers for Executor {
             .await
             .map_err(|_| RouteFailure::Unavailable)?
         })
+    }
+}
+
+impl RouteHandlers for Executor {
+    fn names(&self) -> Vec<String> {self.modules.keys().cloned().collect()}
+    fn verifiers(&self) -> Vec<String> {self.verifiers.keys().cloned().collect()}
+    fn verify(&self,name:&str,context:Value,timeout:Duration)->std::pin::Pin<Box<dyn std::future::Future<Output=Result<bool,RouteFailure>>+Send+'_>> {
+        let name=name.to_owned();
+        Box::pin(async move {self.execute(&name,context,timeout,true).await.map(|value|value==Value::Bool(true))})
+    }
+    fn run(&self,name:&str,context:Value,timeout:Duration)->std::pin::Pin<Box<dyn std::future::Future<Output=Result<Value,RouteFailure>>+Send+'_>> {
+        self.execute(name,context,timeout,false)
     }
 }
 

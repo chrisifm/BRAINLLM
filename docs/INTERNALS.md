@@ -116,7 +116,7 @@ COMPILER assigns the next free code there in the same change that emits it, then
   B0208 on: without handler · B0209 repeated attribute · B0210 raw HTML without `sanitize` · B0211 `unload` listener ·
   B0212 (info) ternary in `class=` → `class:x`. · B0216 unknown `transition:` kind (edit) · B0217 `<component>`
   without `is` · B0218 slot props mixed with other content. · B0223 (info, edit) `onclick={f}` on a native element → `on:click` ·
-  B0224 (warning) `onclick="…"`, an inline handler the CSP blocks.
+  B0224 (warning) `onclick="…"`, an inline handler the CSP blocks. · B0225 (warning) a lazy component also rendered eagerly in the same file (including import aliases); scoped each/await/slot bindings are excluded. It suggests consistent lazy uses without rewriting deliberate mounts.
 - B03xx CSS: B0301 global selector · B0302 nonexistent token (`--space-0` and its synonyms normalize to `0`, info) · B0303 nonexistent mixin. · B0307 dead CSS that `@scope` cancels (html/body/:root not first, `:scope ~`/`+`, a tag the component never writes; warning) · B0309 style rule outside `@layer` in tokens.cssbrain (beats every layered rule; warning)
 - B04xx accessibility and B05xx SEO: §8.
 - B1010 component over 150 lines or 20 KB (warning; the fix is the exact `brain split` command or the repeated block, §43).
@@ -712,15 +712,8 @@ A single engine (`brain-check`) runs in `brain check`, on every `brain run` reco
 MCP. There is no separate linter to install. Levels: error (blocks build), warning (does not block), info.
 
 New families in addition to B00–B11:
-- **B12xx compatibility:** the binary embeds a Baseline table of web and CSS APIs (generated at binary build time
-  from web-features data, dated version). B1201 API/property not supported in the target (`brain.json`
-  → `"targets": "baseline-widely"` by default) · B1202 experimental or limited API without feature detection
-  (`if ('moveBefore' in Element.prototype)`) · B1203 obsolete/deprecated API (with replacement in the fix).
-- **B13xx bad practices:** B1301 `await` inside a `for-of` over independent data (→ `Promise.all`) ·
-  B1302 `fetch` without error handling · B1303 nested loop over the same list (O(n²)) when a `Map` fits ·
-  B1304 `fx` without reactive dependencies (→ mount code) · B1305 heavy computation inside `{#each}` (→ `drv`) ·
-  B1306 timers without cleanup (in addition to B0602 at runtime) · B1307 magic time/size number outside tokens or
-  constants · B1308 `console.*` except `error` and `warn` (→ `log`).
+- **B21xx compatibility:** the binary embeds a pinned Baseline/web-features dataset. B2101 identifies a browser API outside the configured target; B2102 identifies a CSS/HTML feature outside that target; B2103 identifies an invalid target. Unknown receiver types remain unknown, and exact feature guards permit progressive enhancement. See the actual catalog and browser_compat.rs for the bounded supported analysis.
+- **B13xx structural performance advice (2026-11-06):** B1301 serial awaited calls in for-of (skip proven loop-carried dependencies); B1303 nested traversal of the same stable collection (skip mutation, aliases, shadowing and early exits); B1305 a proven literal-array traversal in each rendering without item/index references (skip effectful callbacks and unknown receivers); B1308 console normalization; B1310 oversized list; B1311 runtime RegExp; B1312 item-dependent direct declared API GETs; B1313 potential synchronous layout on a proven DOM receiver (native bind:ref or unshadowed document query) in a straight-line write/read loop. B1301/3/5 and B1312/13 are warnings with conditional guidance and no edits. No runtime complexity, API purity, cache miss, exact database query count or measured speedup is claimed. Earlier B1302/4/6/7 prose did not correspond to implemented codes; use actual B1107 bare-fetch, B1004 derived-effect and runtime cleanup diagnostics where applicable. Unknown cases remain unknown.
 - Loops: B0901–B0904 (§18).
 
 **Where it shows up:**
@@ -974,6 +967,25 @@ Patterns from Vite, Next, Biome, Turborepo, Cargo and Deno applied to `brain`:
   binary, zero runtime dependencies, no telemetry. New-version notice: at most one query per day,
   in the background, never in CI.
 
+### Bounded author tooling (2026-11-06)
+
+`tooling_bench` owns anonymous single-URL observations: reqwest has proxy use, retry and redirects disabled,
+sequential 1–20 GETs (default 3), request/connect deadlines 3/2 seconds, total deadline 30 seconds and a streamed
+256 KiB body cap. It returns status, headers-ready elapsed time, total elapsed time and bytes; bodies and response
+headers never enter reports. firstObserved/repeatObserved do not imply controlled cold/warm cache conditions.
+`adoption_audit` is read-only: package dependency-key detection and source file metadata/name inventory only.
+No source body or script executes. Metadata entry/depth/source/path/package limits fail explicitly rather than
+returning an apparently complete truncated inventory. Hidden/generated/dependency trees and symlinks are skipped.
+`tooling_connect` spawns exactly the current executable with minimal-profile MCP, verifies initialize protocol,
+id/serverInfo/capabilities, sends initialized, and terminates/reaps its owned child on success/failure. The handshake
+has a five-second total deadline, stdout is capped at64 KiB, stderr is discarded, and termination gets one second.
+It returns a proposal containing local executable/cwd paths without writing any client file. No tools are called.
+`practices::query` pages sorted actual CODES records without a cache/build/application execution. HTML/CSS/SEO/
+performance/WebMCP/language labels are navigation hints. B18xx has a separate built/live SEO audit catalog.
+Only B1706/7/8 optional discovery nudges join the existing adjustable lint families, with off/info/warning. Error
+promotion is ignored for these nudges, so optional coverage never becomes mandatory. Doctor applies B1708's level
+at its separate advice generation point. Tool contract/confirmation B1701–5 and duplicate B1709 cannot be disabled or lowered; existing default severities remain unchanged.
+
 ## 24. `brain mcp`: full project control over MCP (fixed 2026-10-13)
 Update (2026-10-29): new apps register stdio in `.mcp.json` (Claude Code) and `.cursor/mcp.json` (Cursor), preserving
 existing servers. CLAUDE.md imports AGENTS.md. `brain agent setup --hooks` installs optional bounded PostToolUse feedback;
@@ -1195,6 +1207,11 @@ gateways. Node's owned emitted source omits its attribution URL literals; dev HT
 previews also honor the policy. Copied public/foreign bytes are never filtered. Ordinary build grace is disabled
 on policy transitions so obsolete branded chunks are removed, never rewritten under an existing content hash.
 LLM-facing adoption examples preserve true; false requires an explicit end-user request.
+Explicit page scope: root `compilerBrandingScope:"page"` keeps the enabled document/build policy while omitting
+generated browser JS/CSS trailers before hashes, SRI and compression. Default `"file"` keeps existing per-file
+comments. The pack graph, tokens/view styles, dictionaries, locale links and analytics bootstrap share this scope;
+standalone SW/server files retain their attribution. Metadata records the selected scope. Authored/copied bytes and
+the ordinary old-chunk grace period remain intact; full `compilerBranding:false` still drops stale attribution.
 Generator discovery copy (2026-11-05) appends branding::DESCRIPTION to the escaped HTML generator version label.
 It names the Rust frontend/full-stack compiler without adding site-topic keywords or changing authored metadata.
 The entire tag still follows compilerBranding. npm descriptions/keywords separately name actual JavaScript,
@@ -1488,6 +1505,13 @@ Mode v2 defaulting to denied until the app calls `consent('analytics')`; site ve
 - Tools run with the page's permissions only; anything destructive should ask for confirmation in the UI.
 
 ## 33. `brain-seo`: the SEO module (fixed 2026-10-13, Chris: "much more powerful than WordPress")
+
+Sitemap follow-ups (2026-11-06): `brain-cli/src/seo_diff.rs` compares bounded old/new path+query sets, validates
+origins within each inventory, supports one-level local or explicitly requested HTTP indexes and writes nothing.
+Local child resolution never invokes HTTP. `seo_live::spread` stratifies by visible first-segment/depth groups,
+without inferring route templates or page weight. JobPosting B1818 uses token-sequence company/location matching
+and an explicit punctuation heuristic; see SEO-SITE.md for bounds and current Google source.
+
 Owner: SEO role. Crate `crates/brain-seo` (no third-party deps), wired into `brain build`, `brain doctor` and the CLI as
 `brain seo [audit|preview|og|links|redirects] [--json]`, and into MCP as `brain_seo_*`. Everything is computed at build
 time from the prerendered HTML, the route graph and the content collections — no plugins, no database.
@@ -1568,6 +1592,12 @@ is opt-in by the file's existence. The build only reads it (generators never wri
 `brain seo urls --write` only adds, sorted, so the diff shows what was published.
 
 ## 34. Production process manager: `brain start` (fixed 2026-10-13, Chris: our own manager, not PM2)
+
+`brain backend conform` (2026-11-06) is a separate bounded read-only HTTP observer, not a new server error protocol.
+It pins an explicit origin, requests JSON without credentials/proxy/retries/redirects, and emits status/shape facts
+rather than response-body values. HEAD is paired with GET. Existing four-surface truth-table gates remain the
+write-path acceptance engine. Implementation: brain-cli/src/backend_conform.rs; contract: HTTP-RESPONSES.md.
+
 
 Lifecycle CLI targets (2026-11-04): stop/reload/status accept one optional directory, canonicalize explicit paths
 and resolve the nearest app before connecting. Missing, non-directory and non-app targets fail without cwd fallback.
@@ -2280,7 +2310,41 @@ after §43 on the same briefs; a 60+ component app is built by a model using onl
 files over 200 lines. Both numbers go to the REPORT; a regression fails the bench.
 
 
+### Per-view review guidance from existing evidence (2026-11-06)
+
+`brain-cli::quality_views` is pure bounded projection logic. `quality::refresh` maps actual selected native findings
+through literal/revisioned manifest dependencies into per-view image, page-content, rendering, performance and state
+review actions. Limits512 documents/4096 edges/depth32,128 views,256 total finding references/16 per view are explicit;
+cycles terminate through a visited set and omissions never become a complete-audit claim. No source body, arbitrary
+finding prose, screenshot score, new image or invented page enters this projection. Build recording adds validated
+routeFacts from the same actual build report (128 routes); emitted bytes do not measure transfer or rendering and
+route-to-source matching is not guessed. Reload validates the new persisted shape before returning it.
+The existing save-impact watcher adds viewAdvice from its already collected native diagnostics and affected-view
+byte/SEO deltas. It starts no second watcher, compile, browser or provider call. CLI quality and MCP brain_quality
+return the same additive evidence. Rendered behavior, screenshots and field vitals remain explicitly unmeasured.
+
 ## 44. Experimental Rust backend and durable work (2026-10-29)
+
+Computed backfills (2026-11-06): migration0029 owns the immutable database identity and per-definition checkpoint.
+`brain-cli/src/backfill.rs` translates a bounded existing BrainScript AST into typed `brain-backend/src/backfill.rs`
+operations; it never evaluates JS. Preview is repeatable-read READ ONLY without DDL. Apply holds the shared migration
+lock, named advisory lock and selected row locks; target xmin and checkpoint binding/revision CAS share one transaction
+with native audit. Metadata preflight caps eligible document transfer before fetch. Only target data is persisted,
+updated_at is preserved, and unreviewed hooks/triggers/rules/RLS are refused. See backend/backfills.md for operator
+approval, all bounds and the direct-SQL/cloned-database limitations. Installed native DB functions are trusted.
+
+
+Production CAPTCHA preflight (2026-11-06) rejects public provider test secrets and proven client widget test site
+keys before database configuration/connection. The bounded AST scanner resolves direct literals/public environment
+reads and unshadowed immutable aliases in reachable source; uncertain client configuration stays unknown. An unbound
+provider-named public test-key setting is advisory. Library hosts cannot infer browser settings from server contracts.
+
+A stored role outside the declared role set records request-local evidence. Only a final standard `POLICY_DENIED`
+response can emit private `backend-policy-denied` with fixed reason `undeclared-auth-role`, once per request and at
+most eight times per 60-second process window. No role value, identity or credential is included; the existing sink
+adds sanitized request correlation. This is evidence of an observed undeclared role, not proof of historical outage
+causation. Permission checks, owner/public grants, explicit system-key authority and public responses are unchanged.
+
 
 Crate `brain-backend` owns only infrastructure and resolved data contracts; CLI `backend.rs` parses literal BrainScript
 with the existing parser and generates small schema/policy/hook/job files. [BACKEND.md](BACKEND.md) defines the running
@@ -2752,3 +2816,49 @@ Owned browser cleanup (2026-11-05): test/recovery tabs and screenshot comparison
 The captured target alone is closed, and its disappearance is confirmed through the inventory before returning.
 A finite total cleanup budget covers requests/polling and restores the caller deadline on success or error. A
 Chrome acknowledgement is not proof that the target has already disappeared; other tabs remain usable.
+
+## Optional reporting, warmup and browser defaults
+
+`brain-pack::sentry` pins the optional reporter graph before runtime pruning. Owned minifier token origins survive cleanup, mangling and import replacement; indexed UTF-16 conversion and replacement offsets produce generated-JavaScript token maps. Pruned runtime maps use their final generated stage. Deterministic debug IDs include generated input, rewritten output and mappings before hashing/SRI/compression. Private artifacts exclude source content and original BrainScript; see SENTRY.md. The core observer is bounded to eight subscribers, isolates exceptions and recursive notification, and preserves existing error handling. It adds 91 gzip bytes to the shared core; no optional graph asset is emitted while disabled.
+
+The Node tunnel admits four reports without a queue and retains DNS leases until native resolution returns, even after timeout/close. Per-process minute limits and provider cooldowns have fixed-memory bounds. Every rejected response is fixed JSON. Configuration validation precedes app imports; the listen barrier composes with warmup rather than wrapping competing startup sequences.
+
+`server_warmup` validates exact cached public SSR paths and embeds helper/watchdog only on explicit opt-in. `runWarmup` creates an owned temporary loopback dispatcher, verifies peer/path ownership, uses anonymous read-only contexts and two requests at most, and accounts body/deadline/cleanup budgets. A worker watchdog prevents event-loop stalls from falsely reaching readiness. See STARTUP-WARMUP.md for partial/fatal failure behavior.
+
+Generated `tokens.cssbrain` adds low-priority reset-layer print and forced-colors rules. No global content-visibility policy is imposed and existing authored themes are not rewritten. scripts/test/browser-defaults.test.mjs tests actual browser media behavior; BROWSER-DEFAULTS.md states its limits.
+
+## Bounded frontend route predicates
+
+`brain-lex::param_pattern` owns the parser, compiled ASCII sets/counts and linear native evaluator. Variable atoms are checked against the FIRST sets of their nullable FOLLOW chain. Trusted JS regex output is generated only from compiled hex character sets and integer counts, with a strict printable raw-segment guard and early 256-byte bound; author text never becomes a RegExp source directly. There is no new runtime dependency or unused matcher asset.
+
+`brain-pack::routes::{constraints,matches_with,resolve_with,regex_source_with}` owns table binding. `brain-seo::Config` carries the same parsed map for SEO link/register checks. SEO retains its existing decoded static-file normalization but uses the original encoded URL separately for constrained dynamic candidates and redirects. Both parameter matching and raw URL register tests cover this distinction.
+
+`brain-seo::redirects::Rule.params` contains the same compiled patterns. `export()` is the explicit, fallible host-export API; low-level hint generators return a comment-only unsupported notice rather than broader rules. Build finalization removes incompatible host artifacts, records capabilities and keeps the complete server redirect table. Guard/private-prefix/static ordering is unchanged. The new source-config diagnostic is B1880; the HTML audit corpus declares it unreachable because validation precedes built HTML and is covered by dedicated source/CLI tests.
+
+The filename route matcher already accepted raw strings, but the historical dev HTTP reader decoded its Request.path first. The new opt-in keeps the original bounded request-target in private UpgradeMetadata.raw_path. Only constrained frontend candidates/rules consult it. Filesystem/native/RPC dispatch and unconfigured candidates retain their decoded path behavior; no new raw field is exposed in ctx or logs. Native request body planning still receives the decoded path. The corrected end-to-end negative uses /%32abcdef and /%33abcdef, each seven valid characters after decoding; both stay unmatched in dev and SSR. The static control is /4abcdef to avoid mistaking a real-file alias for a dynamic route.
+
+Without routeParams, validate_request_constraints parses configuration but never discovers views. Its lazy-discovery regression uses a panic closure so an accidental unused table walk fails the test.
+
+## Independent native document-performance aggregates
+
+Migration 0030 adds daily pattern/metric aggregates plus one locked capacity bookkeeping row, separately from behavior analytics and computed backfills. Both gateways omit identity/credentials for the dedicated endpoint while preserving Origin and DNT/GPC; native auth/API key resolution is skipped only for that exact endpoint. Config/payload parsers reject unknown/duplicate fields, raw paths and unsupported metric values.
+
+A shared PostgreSQL fixed subject rate window caps 600 requests/min across processes. The aggregate transaction serializes capacity reservation, bounded lazy expiration and up to five indexed upserts under lock/statement/idle budgets. The cap 250000 includes historical declarations; no racing COUNT/insert is used. Native draining cancels both pending body and SQL work. Report uses READ ONLY and hides expired/undeclared groups; no exact scheduled deletion, trusted-sample, p75 or unique-visitor inference is made.
+
+The production-only graph root brain-native-vitals.js starts observers only after literal analytics consent and privacy signals, maps the initial pathname locally to a declared pattern, and stops on SPA/history navigation. Revocation disconnects/aborts/clears without replay. No core/runtime primitive change or unused optional asset exists; dev supports the POST gateway but not automatic capture injection. See backend/vitals.md for precise limits and source/gateway/PG acceptance.
+
+CLI HTTP observers share http_observer's process-wide four native DNS admissions. Each blocking resolver closure owns its lease across HTTP cancellation and runtime teardown, with no waiting queue, at most 64 returned addresses and fixed errors. Dropping the owned runtime never waits for an uninterruptible system resolver. This also bounds unresolved work across successive MCP HTTP tool calls; timed-out native calls are not claimed to be physically canceled. Numeric loopback transport remains available when DNS capacity is occupied.
+
+### Operator CLI/MCP parity
+
+MCP exposes brain_db_audit, brain_backend_conform, brain_google_setup, brain_seo_diff, brain_vitals_report, brain_data_backfill and brain_edge with strict structured requests. The existing brain_edge_plan alias stays read-only. Each operation invokes exactly the current compiler executable in the current app, with a fixed command prefix and no shell or arbitrary argv. App-relative input files pass source-path confinement; credentials remain private environment values.
+
+Backfill and provider edge apply require explicit confirm:true plus their reviewed request file; previews/read-only commands reject irrelevant confirmation. There is no publication tool. Owned children have a 90-second deadline, a 2 MiB JSON stdout cap and a one-second kill/reap grace; stderr is discarded. The wrapper returns exitCode and the exact structured CLI report, rather than hiding an incomplete observation as success.
+
+### Per-use literal boolean UI branches
+
+Production codegen can select a literal boolean branch inside a stateless `ui/` component that was already eligible for inlining. This is decided separately for each use: only an AST boolean or an inlined prop with nondynamic JavaScript exactly `true` or `false` is known. It never evaluates arbitrary JavaScript or infers a value from all of a component's callers. Ordinary components, standalone UI compilation, dynamic values, scripted/stateful components and development/HMR retain their existing behavior.
+
+Removing `when` also removes its reactive owner. Therefore the chosen body must contain only static literal markup from a small inert native HTML/SVG tag allowlist. Expressions/prop reads, slots, component calls, unknown/custom tags, customized built-ins (`is`), autofocus, handlers, bindings and mixed/dynamic attribute values retain `when`. A known false chain with no selected body is empty; if selection reaches an uncertain condition or an owner-sensitive body, the existing conditional remains. The inline eligibility rules themselves are unchanged.
+
+Selected literal markup still uses fragment generation and insertion at the original anchor, with the same scoped hash. Default slots continue to be emitted in the writer's context because their conditional owner is preserved. No runtime/core API or module was added.

@@ -2,6 +2,25 @@ use brain_backend::contract;
 use serde_json::json;
 
 #[test]
+fn native_apple_uses_explicit_tokens_without_browser_origin_authority() {
+    let api = contract::openapi(&[]);
+    for suffix in ["challenge", "token", "refresh"] {
+        let path = format!("/_brain/auth/apple/native/{suffix}");
+        let op = &api["paths"][&path]["post"];
+        assert_eq!(op["security"], json!([]));
+        assert!(op.get("parameters").is_none(), "native credential requests never require browser Origin");
+        assert_eq!(op["requestBody"]["content"]["application/json"]["schema"]["additionalProperties"], false);
+        let output = &op["responses"]["200"]["content"]["application/json"]["schema"];
+        assert_eq!(output["additionalProperties"], false);
+        if suffix != "challenge" {
+            assert!(output["required"].as_array().unwrap().contains(&json!("refresh_token")));
+        }
+    }
+    assert!(api["paths"]["/_brain/auth/apple/notifications"]["post"].get("parameters").is_none());
+    assert_eq!(api["paths"]["/_brain/auth/apple"]["post"]["parameters"][0]["name"], "Origin");
+}
+
+#[test]
 fn backend_selected_login_modes_preserve_custom_roles_and_closed_request_shapes() {
     let mut roles = brain_backend::auth_flows::RolesConfig::default();
     roles.roles.push("editor".into());

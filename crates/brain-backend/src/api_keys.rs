@@ -555,7 +555,9 @@ async fn write_events(pool: PgPool, mut receiver: mpsc::Receiver<Event>) {
             }
         }
         let column = |f: fn(&Event) -> Option<String>| batch.iter().map(f).collect::<Vec<_>>();
-        let result = sqlx::query("INSERT INTO public._brain_api_key_events(key_id,rid,method,route,path,resource,action,status,latency_ms,client_ip,user_agent,bytes_out,query_keys,system) SELECT k,r,m,ro,p,re,a,s,l,ip,ua,b,CASE WHEN q='' THEN '{}'::text[] ELSE string_to_array(q,',') END,sy FROM UNNEST($1::uuid[],$2::text[],$3::text[],$4::text[],$5::text[],$6::text[],$7::text[],$8::int[],$9::int[],$10::text[],$11::text[],$12::bigint[],$13::text[],$14::bool[]) AS t(k,r,m,ro,p,re,a,s,l,ip,ua,b,q,sy) WHERE EXISTS (SELECT 1 FROM public._brain_api_keys x WHERE x.id=t.k)")
+        // Key identity is immutable database metadata, including refused uses after revocation or expiry.
+        // This trace classification never grants SYSTEM_ACTIVE request authority.
+        let result = sqlx::query("INSERT INTO public._brain_api_key_events(key_id,rid,method,route,path,resource,action,status,latency_ms,client_ip,user_agent,bytes_out,query_keys,system) SELECT k,r,m,ro,p,re,a,s,l,ip,ua,b,CASE WHEN q='' THEN '{}'::text[] ELSE string_to_array(q,',') END,x.system FROM UNNEST($1::uuid[],$2::text[],$3::text[],$4::text[],$5::text[],$6::text[],$7::text[],$8::int[],$9::int[],$10::text[],$11::text[],$12::bigint[],$13::text[],$14::bool[]) AS t(k,r,m,ro,p,re,a,s,l,ip,ua,b,q,sy) JOIN public._brain_api_keys x ON x.id=t.k")
             .bind(batch.iter().map(|e| e.key_id).collect::<Vec<_>>())
             .bind(column(|e| e.rid.clone()))
             .bind(batch.iter().map(|e| e.method.clone()).collect::<Vec<_>>())

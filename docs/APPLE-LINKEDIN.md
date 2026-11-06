@@ -15,6 +15,7 @@ environment; never commit them.
 |---|---|---|
 | `APPLE_CLIENT_ID` | Apple | The Services ID registered for the website (`com.example.web`) |
 | `APPLE_APP_ID` | Apple | Optional primary App ID of that Services ID (`com.example.app`); also accepted as the audience of account notifications |
+| `APPLE_NATIVE_APP_IDS` | Apple native | Independent comma-separated allowlist of 1..16 native bundle IDs; never inferred from either web setting |
 | `APPLE_REDIRECT_URI` | Apple | The https Return URL registered for the Services ID; defaults to the site origin followed by `/` |
 | `BRAIN_AUTH_LINKEDIN_CLIENT_ID` | LinkedIn | The app's Client ID |
 | `BRAIN_AUTH_LINKEDIN_CLIENT_SECRET` | LinkedIn | The app's Primary Client Secret, server-only; never sent to a browser or logged |
@@ -33,10 +34,33 @@ report the same problems early from the development section of `.brain_env` (B07
 | GET `/_brain/auth/linkedin/start` | No body | `303` to LinkedIn with a one-use state bound to the `__Host-brain-linkedin` cookie |
 | GET `/_brain/auth/linkedin/callback` | `code`, `state` from LinkedIn | Sets the session and redirects `303` to `/`; any refusal or cancelled consent redirects to `/?signin=failed` |
 
-The two challenge and login endpoints are same-origin mutations like Google's. Apple's notification endpoint is the
-only one that accepts a POST without the site `Origin`: Apple calls it server to server, and the handler accepts only a
+The browser challenge and login endpoints are same-origin mutations like Google's. Apple's notification endpoint accepts
+a POST without the site `Origin`: Apple calls it server to server, and the handler accepts only a
 payload signed with Apple's keys. Register `https://<your-site>/_brain/auth/apple/notifications` as the Services ID's
 server-to-server notification endpoint.
+
+## Native Apple clients
+
+Native sign-in has a separate, explicit audience allowlist and challenge purpose. Configure
+`APPLE_NATIVE_APP_IDS=com.example.app`, the normal native JWT settings and migration 0028. A native-only
+deployment does not need `APPLE_CLIENT_ID`. Adding a web Services ID or notification App ID never
+enables it as a native login audience, and enabling a native audience never widens browser login.
+
+1. POST `/_brain/auth/apple/native/challenge` with JSON `{ "client_id": "com.example.app" }`.
+   It returns `{client_id, nonce, expires_in}` only for a configured bundle ID. Pass this exact nonce
+   into the native Apple authorization request; do not transform it or substitute a local nonce.
+2. POST `/_brain/auth/apple/native/token` with `{id_token, nonce, name?}`. Apple signature, issuer,
+   expiry, exact string audience and challenge nonce must verify. The challenge is bound to that
+   audience and consumed once, transactionally with the identity/session. Replay is rejected.
+3. Store the returned `access_token` and rotating `refresh_token` in the native platform's protected
+   credential store. JSON also contains `user`, `token_type`, `expires_in` and `refresh_expires_in`.
+   POST `{refresh_token}` to `/_brain/auth/apple/native/refresh` to rotate it. Existing session
+   revocation applies. Never log tokens or put them in URLs.
+
+These three POST endpoints accept neither `Cookie` nor `Origin` and set no cookies. Responses are
+`no-store` and `no-cache`. A browser must use the browser flow rather than send its ambient session
+to the native endpoints. Synthetic provider tests establish the verification contract; they do not
+replace testing your registered native App ID with Apple on an actual device.
 
 ## Apple
 

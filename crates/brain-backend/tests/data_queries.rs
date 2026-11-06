@@ -157,7 +157,8 @@ async fn api(pool: &sqlx::PgPool, resources: Vec<Resource>) -> Api {
     let http = brain_backend::http::router(
         pool.clone(),
         brain_backend::Config {
-            api_keys: None,
+            vitals: None,
+        api_keys: None,
             roles: Default::default(),
             mail: None,
             auth_public_base_url: None,
@@ -166,7 +167,7 @@ async fn api(pool: &sqlx::PgPool, resources: Vec<Resource>) -> Api {
             sockets: None,
             gcs: None,
             jwt: None,
-            google: None, apple: None, linkedin: None,
+            google: None, apple: None, apple_native: None, linkedin: None,
             resources,
             jobs: Vec::new(),
             uploads: std::env::temp_dir().join(format!("brain-data-queries-{}", Uuid::new_v4().simple())),
@@ -183,6 +184,65 @@ fn ids(list: &Value) -> Vec<String> {
 }
 fn titles(list: &Value) -> Vec<String> {
     list["items"].as_array().unwrap().iter().map(|r| r["data"]["title"].as_str().unwrap().to_string()).collect()
+}
+
+fn grouped_resource() -> Resource {
+    resource("grouped_items", vec![("category", field("str", false)), ("tags", field("list<str>", false)), ("other_tags", field("list<str>", false)), ("amount", field("decimal(10,2)", true)), ("enabled", field("bool", false)), ("rank", field("int", false)), ("private_note", Field { access: Some("private".into()), ..field("str", false) })],
+        policy(&["owner"], &["user"], &["owner"], &["owner"]),
+        json!({"aggregate":{"totals":{"sum":["amount"]},"tags":{"group":"tags","sum":["amount"]},"category_tags":{"group":["category","tags"],"sum":["amount"]},"dimensions":{"group":["category","enabled","rank"],"sum":["amount"]}}}))
+}
+
+#[test]
+fn aggregate_groups_keep_legacy_shapes_and_bound_public_dimensions() {
+    let resource = grouped_resource();
+    assert!(resource.validate().is_ok());
+    let encoded = serde_json::to_value(&resource.query).unwrap();
+    assert_eq!(encoded["aggregate"]["tags"]["group"], "tags");
+    assert_eq!(encoded["aggregate"]["category_tags"]["group"], json!(["category", "tags"]));
+    for group in [json!([]), json!(["category","category"]), json!(["category","enabled","rank","tags","other_tags"]), json!(["tags","other_tags"]), json!(["private_note"]), json!(["category","missing"]), json!("category'); DROP TABLE x; --")] {
+        let mut invalid = serde_json::to_value(&resource).unwrap();
+        invalid["query"]["aggregate"]["dimensions"]["group"] = group;
+        let invalid: Resource = serde_json::from_value(invalid).unwrap();
+        assert!(invalid.validate().is_err(), "invalid or restricted grouping must not enter SQL");
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires scripts/backend-check.mjs disposable Postgres"]
+async fn aggregate_arrays_and_multiple_fields_preserve_owner_scope_exact_values_and_group_limits() {
+    let pool = database("brain_group_dimensions").await;
+    let api = api(&pool, vec![grouped_resource()]).await;
+    let (owner_id, owner) = api.user("group-owner@example.test").await;
+    let (_, rival) = api.user("group-rival@example.test").await;
+    for row in [json!({"category":"a","tags":["x","x","y"],"amount":"10.00","enabled":true,"rank":2}), json!({"category":"b","tags":["x"],"amount":"20.00","enabled":false,"rank":3}), json!({"category":"a","tags":[],"amount":"30.00","enabled":true,"rank":2}), json!({"amount":"40.00"})] {
+        let (status, result) = api.post("/api/grouped_items", &owner, row).await;
+        assert_eq!(status, 200, "{result}");
+    }
+    assert_eq!(api.post("/api/grouped_items", &rival, json!({"category":"hidden","tags":["x"],"amount":"900.00"})).await.0, 200);
+    let (status, result) = api.get("/api/grouped_items?aggregate=totals,tags,category_tags,dimensions", Some(&owner)).await;
+    assert_eq!(status, 200, "{result}");
+    let aggregate = &result["aggregates"];
+    assert_eq!(aggregate["totals"]["count"], 4);
+    assert_eq!(aggregate["totals"]["sum"]["amount"], "100.00");
+    let tags = aggregate["tags"].as_array().unwrap();
+    assert_eq!(tags.len(), 2, "empty/missing lists add no element bucket");
+    assert_eq!(tags[0]["key"], "x");
+    assert_eq!(tags[0]["count"], 2, "a repeated array element must never multiply count or sum");
+    assert_eq!(tags[0]["sum"]["amount"], "30.00");
+    assert_eq!(tags[1]["key"], "y");
+    assert_eq!(tags[1]["sum"]["amount"], "10.00");
+    let dimensions = aggregate["dimensions"].as_array().unwrap();
+    assert!(dimensions.iter().any(|row| row["key"] == json!({"category":"a","enabled":true,"rank":2}) && row["count"] == 2 && row["sum"]["amount"] == "40.00"));
+    assert!(dimensions.iter().any(|row| row["key"] == json!({"category":null,"enabled":null,"rank":null}) && row["count"] == 1));
+    assert_eq!(aggregate["category_tags"].as_array().unwrap().len(), 3);
+    assert!(!result.to_string().contains("hidden") && !result.to_string().contains("900.00"));
+    assert_eq!(api.get("/api/grouped_items?aggregate=tags", None).await.0, 401);
+    sqlx::query("INSERT INTO public._brain_res_grouped_items(id,owner,data) SELECT gen_random_uuid(),$1,jsonb_build_object('category','many','rank',n,'amount','1.00','tags',jsonb_build_array('x','x'),'enabled',true) FROM generate_series(1,120)n").bind(owner_id).execute(&pool).await.unwrap();
+    let (status, limited) = api.get("/api/grouped_items?aggregate=dimensions", Some(&owner)).await;
+    assert_eq!(status, 200, "{limited}");
+    assert_eq!(limited["aggregates"]["dimensions"].as_array().unwrap().len(), 100);
+    assert_eq!(limited["aggregates_truncated"], json!(["dimensions"]));
+    pool.close().await;
 }
 
 #[tokio::test]
@@ -716,8 +776,9 @@ async fn search_language_weights_and_legacy_numeric_ids() {
     let api = Api { http: brain_backend::http::router(
         pool.clone(),
         brain_backend::Config {
-            api_keys: None, roles: Default::default(), mail: None, auth_public_base_url: None, webhooks: None,
-            before_hooks: None, sockets: None, gcs: None, jwt: None, google: None, apple: None, linkedin: None, resources: vec![english],
+            vitals: None,
+        api_keys: None, roles: Default::default(), mail: None, auth_public_base_url: None, webhooks: None,
+            before_hooks: None, sockets: None, gcs: None, jwt: None, google: None, apple: None, apple_native: None, linkedin: None, resources: vec![english],
             jobs: Vec::new(), uploads: std::env::temp_dir().join(format!("brain-data-queries-{}", Uuid::new_v4().simple())),
             origins: vec![ORIGIN.into()], production: false,
         },

@@ -81,7 +81,7 @@ Composite unique sets have 2–4 fields; single-field uniqueness uses `unique: t
 enforced in the request validator and in Postgres (deterministic `_brain_ck_*` constraints and `_brain_ux_*`
 expression indexes). On a new resource, migration creates them; if existing rows violate one, the migration rolls back
 with an actionable message. Fields, search fields and constraints are part of the registered contract, so adding one to a
-resource that is already registered answers `BDB_SCHEMA_DRIFT` (B0787) and changes nothing. `brain backend approve-contract` previews the difference with the rows each change touches; `--apply` records it. An added optional field, a relaxed `required`, a wider enum (the new values include every old one), a narrower enum that no stored row uses (the preview counts `rowsAffected`) and an added field with a `default` apply directly, and anything that can invalidate a stored row also needs `--accept <resource>`. An added field with a `default`, required or not, writes that default into every stored row that lacks it in the same transaction. `--only <resource>[,<resource>]` approves and applies just those resources and reports the other changed ones as `pending` with their recorded contract; without `--only` every changed resource is applied or nothing is. Rows are otherwise never rewritten or removed, and a row that violates the new contract rolls everything back. `verify` reports a missing object the same way. A duplicate returns HTTP 409
+resource that is already registered answers `BDB_SCHEMA_DRIFT` (B0787) and changes nothing. `brain backend approve-contract` previews the difference with the rows each change touches; `--apply` records it. `safe:true` describes stored-row compatibility, not permission for automatic migration; even an added optional field needs that explicit approval. An added optional field, a relaxed `required`, a wider enum (the new values include every old one), a narrower enum that no stored row uses (the preview counts `rowsAffected`) and an added field with a `default` apply directly, and anything that can invalidate a stored row also needs `--accept <resource>`. An added field with a `default`, required or not, writes that default into every stored row that lacks it in the same transaction. `--only <resource>[,<resource>]` approves and applies just those resources and reports the other changed ones as `pending` with their recorded contract; without `--only` every changed resource is applied or nothing is. Rows are otherwise never rewritten or removed, and a row that violates the new contract rolls everything back. `verify` reports a missing object the same way. A duplicate returns HTTP 409
 `UNIQUE_CONFLICT` with the field names; a database check violation returns 422 `CONSTRAINT_VIOLATION`.
 Legacy contracts serialize and record exactly as before and receive no new database objects. Byte limits of list
 items are enforced by the application layer only. `--admin-ui` generates controls only for the legacy types.
@@ -228,6 +228,8 @@ Database TLS and boot retry, health probes, backpressure and graceful shutdown: 
 Several processes or machines (shared rate windows, socket fan-out through LISTEN/NOTIFY): [backend/cluster.md](backend/cluster.md).
 ETag and 304 on API reads, public cache lifetimes for anonymous reads, If-Match on writes: [backend/caching.md](backend/caching.md).
 Bringing accounts and records from another system: [backend/import.md](backend/import.md).
+Computed existing-row values, operator preview and durable batches: [backfills](backend/backfills.md).
+Read-only current-database/role diagnostics: [database audit](backend/database-audit.md).
 App-declared routes with typed path, query and headers, per-route limits and auth: [backend/routes.md](backend/routes.md).
 Signed webhook routes for payment and shipping providers (HMAC, timestamp tolerance, raw body): [backend/webhooks.md](backend/webhooks.md).
 Calling external APIs from server logic (timeouts, safe retries, idempotency keys, redacted errors): [backend/outbound.md](backend/outbound.md).
@@ -282,3 +284,7 @@ that floods stderr or leaves a child holding the pipe open. There is no detached
 reader task. The index has at most 2048 entries and 256 KiB; the Node trace itself
 is limited to 32 KiB. If stderr or tracing is truncated, absence of a location is
 not proof that the handler had no relevant frame.
+
+Native [document-performance aggregates](backend/vitals.md) are an independent, consented opt-in with no visitor/session identities. The collector is disabled by default and requires existing Node/SSR plus the native backend.
+
+Read and update grants are independent. Explicit permission to update does not grant GET access, and the final write response redacts data when that writer cannot read the resulting row. A missing read grant does not silently revoke a separately declared write grant. To prevent blind writes, remove or narrow the update grant in the resource policy; do not rely on hiding GET alone.

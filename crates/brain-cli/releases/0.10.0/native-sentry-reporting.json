@@ -1,0 +1,27 @@
+{
+  "id": "native-sentry-reporting",
+  "kind": "capability",
+  "title": "Optional private browser error reporting",
+  "why": "Explicit consented browser error coordinates use owned deterministic debug IDs, private generated-JavaScript maps and a bounded Node HTTPS tunnel. No automatic artifact upload or static conversion occurs.",
+  "changelog": [
+    "Optional native Sentry reporting keeps messages and private maps out of public output"
+  ],
+  "guide": "docs/SENTRY.md",
+  "apis": [
+    "sentry.enabled",
+    "BRAIN_SENTRY_DSN"
+  ],
+  "affects": [
+    "brain.json"
+  ],
+  "adopt": {
+    "file": "brain.json",
+    "snippet": "{\"sentry\":{\"enabled\":true}}"
+  },
+  "uses": [
+    {
+      "glob": "brain.json",
+      "contains": "\"sentry\""
+    }
+  ]
+}

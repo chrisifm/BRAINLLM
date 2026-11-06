@@ -1,7 +1,7 @@
 //! Private compiled native hooks. Two owned Node sidecars, no wait queue and no application error bodies in logs.
 use brain_backend::{
     Resource,
-    before_hooks::{BeforeHooks, Executor, HookFailure},
+    before_hooks::{BeforeHooks, Executor, HookFailure, TIMEOUT},
 };
 use brain_serve::load::Sidecar;
 use serde_json::{Value, json};
@@ -9,8 +9,9 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::Duration,
 };
+#[cfg(test)]
+use std::time::Duration;
 struct Compiled {
     _scratch: crate::backend::Scratch,
     module: PathBuf,
@@ -24,7 +25,7 @@ struct Hooks {
     slots: Arc<tokio::sync::Semaphore>,
 }
 fn spawn(root: &Path, vars: &[(String, String)], production: bool) -> Result<Sidecar, String> {
-    Sidecar::spawn_bounded(root,vars,Duration::from_secs(2),65536,production).map_err(|error| {
+    Sidecar::spawn_bounded(root,vars,TIMEOUT,65536,production).map_err(|error| {
         if error.kind() == std::io::ErrorKind::Unsupported {
             "Native before-hooks require Unix process-tree supervision in this release; use a supported Unix backend host".into()
         } else {
@@ -112,8 +113,10 @@ impl BeforeHooks for Hooks {
         context: Value,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, HookFailure>> + Send + '_>>
     {
+        let deadline=std::time::Instant::now()+TIMEOUT;
         let name = name.to_owned();
         Box::pin(async move {
+            if std::time::Instant::now()>=deadline {return Err(HookFailure::Unavailable);}
             let permit = self
                 .slots
                 .clone()
@@ -143,10 +146,12 @@ impl BeforeHooks for Hooks {
                 })
                 .map(str::to_owned);
             let ctx = serde_json::to_string(&context).map_err(|_| HookFailure::Unavailable)?;
+            if std::time::Instant::now()>=deadline {return Err(HookFailure::Unavailable);}
             tokio::task::spawn_blocking(move || {
                 let _permit=permit;
+                if std::time::Instant::now()>=deadline {return Err(HookFailure::Unavailable);}
                 let mut sidecar=pool.lock().map_err(|_|HookFailure::Unavailable)?.pop().ok_or(HookFailure::Unavailable)?;
-                let result=sidecar.invoke(&brain_serve::load::file_url(&compiled.module),"default",&ctx,None);
+                let result=sidecar.invoke_until(&brain_serve::load::file_url(&compiled.module),"default",&ctx,None,deadline);
                 let (result,reusable)=match result {
                     Ok(raw)=> (serde_json::from_str::<Value>(&raw).map_err(|_|HookFailure::Unavailable),true),
                     Err((422,raw))=> {
@@ -179,6 +184,36 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+    #[test]
+    fn queued_hook_never_executes_after_its_outer_deadline() {
+        let root=Root(std::env::temp_dir().join(format!("brain-hook-queued-deadline-{}",std::process::id())));
+        std::fs::create_dir_all(&root.0).unwrap();
+        let module=root.0.join("hook.mjs");
+        let marker=root.0.join("executed");
+        std::fs::write(&module,"import {writeFileSync} from 'node:fs'; export default ctx=>{writeFileSync(ctx.marker,'executed');return ctx.payload}\n").unwrap();
+        let (scratch,module)=crate::backend::server_module(&root.0,"hook.mjs").unwrap();
+        let mut sidecar=spawn(&root.0,&[],true).unwrap();
+        sidecar.probe(&brain_serve::load::file_url(&module),"default").unwrap();
+        let hooks=Hooks{root:root.0.clone(),vars:vec![],production:true,
+            modules:BTreeMap::from([("validate".into(),Arc::new(Compiled{_scratch:scratch,module}))]),
+            pool:Arc::new(Mutex::new(vec![sidecar])),slots:Arc::new(tokio::sync::Semaphore::new(1))};
+        let runtime=tokio::runtime::Builder::new_multi_thread().worker_threads(2).max_blocking_threads(1).enable_all().build().unwrap();
+        runtime.block_on(async {
+            let (release,blocked)=std::sync::mpsc::channel::<()>();
+            let (started,ready)=tokio::sync::oneshot::channel();
+            let blocker=tokio::task::spawn_blocking(move ||{let _=started.send(());let _=blocked.recv_timeout(Duration::from_secs(5));});
+            ready.await.unwrap();
+            let outcome=tokio::time::timeout(Duration::from_secs(2),hooks.run("validate",json!({"marker":marker,"payload":{"title":"example"}}))).await;
+            assert!(outcome.is_err(),"the outer request must expire while its hook remains queued");
+            assert!(!marker.exists());
+            let _=release.send(());
+            blocker.await.unwrap();
+            // FIFO dispatch on the sole blocking worker proves the previously queued hook has been processed.
+            tokio::task::spawn_blocking(||{}).await.unwrap();
+            assert!(!marker.exists(),"a rejected mutation's queued hook must never execute later");
+        });
+        drop(hooks);
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn scaffolded_hooks_compile_fail_closed_transform_in_production_bound_capacity_and_recover()

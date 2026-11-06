@@ -1,0 +1,16 @@
+{
+  "id": "browser-theme-defaults",
+  "kind": "fix",
+  "title": "Conservative generated theme media defaults",
+  "why": "New themes retain browser forced-color semantics and add basic print layout rules without enabling global content-visibility or rewriting existing authored themes.",
+  "changelog": [
+    "New theme scaffolds include print and forced-colors defaults"
+  ],
+  "guide": "docs/BROWSER-DEFAULTS.md",
+  "apis": [
+    "tokens.cssbrain"
+  ],
+  "affects": [
+    "tokens.cssbrain"
+  ]
+}

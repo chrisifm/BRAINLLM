@@ -108,6 +108,9 @@ pub struct Batch {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Action {
+    #[serde(default, rename = "systemOnly", skip_serializing_if = "is_false")]
+    pub system_only: bool,
+    #[serde(default)]
     pub roles: Vec<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub input: BTreeMap<String, String>,
@@ -140,6 +143,9 @@ pub struct Transitions {
 pub struct Transition {
     pub from: Vec<String>,
     pub to: String,
+    #[serde(default, rename = "systemOnly", skip_serializing_if = "is_false")]
+    pub system_only: bool,
+    #[serde(default)]
     pub roles: Vec<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub input: BTreeMap<String, String>,
@@ -159,6 +165,7 @@ pub struct Transition {
 impl Transition {
     fn action(&self, field: &str) -> Action {
         let mut action = Action {
+            system_only: self.system_only,
             roles: self.roles.clone(),
             input: self.input.clone(),
             when: self.when.clone(),
@@ -176,6 +183,10 @@ impl Transition {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Operation {
+    /// Only a verified system key may call this operation; ordinary/admin sessions never gain this authority.
+    #[serde(default, rename = "systemOnly", skip_serializing_if = "is_false")]
+    pub system_only: bool,
+    #[serde(default)]
     pub roles: Vec<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub input: BTreeMap<String, String>,
@@ -184,6 +195,7 @@ pub struct Operation {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub result: Vec<String>,
 }
+fn is_false(value: &bool) -> bool { !*value }
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Step {
@@ -383,7 +395,10 @@ fn grants_valid(roles: &[String], allow_owner: bool) -> bool {
 impl Action {
     fn validate(&self, r: &Resource, label: &str, known_steps: Option<&[String]>) -> Result<(), String> {
         let fail = |m: String| Err(format!("{label}: {m}"));
-        if !grants_valid(&self.roles, true) {
+        if self.system_only && !self.roles.is_empty() {
+            return fail("systemOnly actions and transitions cannot also grant roles; omit roles to require a verified system key".into());
+        }
+        if !self.system_only && !grants_valid(&self.roles, true) {
             return fail("roles must list 1..16 configured role names, owner or owner.<ref field>; public cannot write".into());
         }
         let inputs = input_validator("input", &self.input).map_err(|m| format!("{label}: {m}"))?;
@@ -534,7 +549,10 @@ impl Domain {
             if !crate::contract::identifier(op_name) {
                 return Err(format!("{label}: invalid operation name"));
             }
-            if !grants_valid(&op.roles, false) {
+            if op.system_only && !op.roles.is_empty() {
+                return Err(format!("{label}: systemOnly operations cannot also grant roles; omit roles to require a verified system key"));
+            }
+            if !op.system_only && !grants_valid(&op.roles, false) {
                 return Err(format!("{label}: roles must list 1..16 configured role names (owner and public are not operation grants)"));
             }
             let inputs = input_validator("input", &op.input).map_err(|m| format!("{label}: {m}"))?;
@@ -620,6 +638,14 @@ impl Domain {
                     (Kind::Transition, Some(m)) if domain.and_then(|d| d.transitions.as_ref()).is_some_and(|t| t.transitions.contains_key(m)) => {}
                     (Kind::Action | Kind::Transition, _) => return Err(format!("{slabel}: `{target}` is not declared")),
                     _ => {}
+                }
+                let system_step = member.is_some_and(|member| match kind {
+                    Kind::Action => domain.and_then(|d| d.actions.get(member)).is_some_and(|action| action.system_only),
+                    Kind::Transition => domain.and_then(|d| d.transitions.as_ref()).and_then(|t| t.transitions.get(member)).is_some_and(|transition| transition.system_only),
+                    _ => false,
+                });
+                if system_step && !op.system_only {
+                    return Err(format!("{slabel}: `{target}` is systemOnly; mark this operation systemOnly too instead of granting an indirect role bypass"));
                 }
                 if let Some(t) = domain.and_then(|d| d.transitions.as_ref())
                     && matches!(kind, Kind::Update | Kind::Upsert)
@@ -1082,6 +1108,9 @@ impl<'a> Engine<'a> {
         steps: &BTreeMap<String, Value>,
         state: Option<&str>,
     ) -> Result<Value, Failure> {
+        if action.system_only && !crate::api_keys::system_active() {
+            return Err(Failure::Forbidden);
+        }
         let at = |m: BTreeMap<String, String>| match label {
             Some(l) => prefixed(l, m),
             None => m,
@@ -1092,7 +1121,7 @@ impl<'a> Engine<'a> {
             .ok_or_else(|| Failure::Missing(label.unwrap_or("id").into()))?;
         match authority {
             Authority::Roles => {
-                let mut allowed = crate::api_keys::system_active() || action.roles.iter().any(|role| role == &self.user.role || role == "owner" && owns(&existing, self.user));
+                let mut allowed = crate::api_keys::system_active() || !action.system_only && action.roles.iter().any(|role| role == &self.user.role || role == "owner" && owns(&existing, self.user));
                 if !allowed {
                     allowed = self.owns_through(tx, r, id, &action.roles).await.map_err(located(&r.name, label))?;
                 }
@@ -1243,7 +1272,7 @@ impl<'a> Engine<'a> {
     /// `POST /_brain/operations/<name>`: every step in one transaction; any failure rolls all of them back.
     pub async fn operation(&mut self, tx: &mut Tx, name: &str, input: &Value) -> Result<Value, Failure> {
         let op = self.domain.operations.get(name).ok_or_else(|| Failure::Missing("operation".into()))?;
-        if !crate::api_keys::system_active() && !op.roles.iter().any(|role| role == &self.user.role) {
+        if !crate::api_keys::system_active() && (op.system_only || !op.roles.iter().any(|role| role == &self.user.role)) {
             return Err(Failure::Forbidden);
         }
         let input = Self::validate_input(&op.input, input, "input")?;
@@ -1590,11 +1619,11 @@ pub fn openapi(domain: &Domain, resources: &[Resource], api: &mut Value) {
         }
         let Some(d) = d else { continue };
         for (name, action) in &d.actions {
-            paths.insert(format!("/api/{}/{{id}}/actions/{name}", r.name), json!({"parameters":[id_param],"post": post(format!("{}_action_{name}", r.name), "Atomic action on the locked record: guards (when), assignments (set) and deltas (increment) in one transaction.", input_schema(&action.input), row.clone(), json!({"x-brain-action":action}))}));
+            paths.insert(format!("/api/{}/{{id}}/actions/{name}", r.name), json!({"parameters":[id_param],"post": post(format!("{}_action_{name}", r.name), "Atomic action on the locked record: guards (when), assignments (set) and deltas (increment) in one transaction.", input_schema(&action.input), row.clone(), json!({"x-brain-action":action,"x-brain-system-only":action.system_only}))}));
         }
         if let Some(t) = &d.transitions {
             for (name, transition) in &t.transitions {
-                paths.insert(format!("/api/{}/{{id}}/transitions/{name}", r.name), json!({"parameters":[id_param],"post": post(format!("{}_transition_{name}", r.name), &format!("Move `{}` from {} to {} in one transaction.", t.field, transition.from.join("|"), transition.to), input_schema(&transition.input), row.clone(), json!({"x-brain-transition":transition,"x-brain-state-field":t.field}))}));
+                paths.insert(format!("/api/{}/{{id}}/transitions/{name}", r.name), json!({"parameters":[id_param],"post": post(format!("{}_transition_{name}", r.name), &format!("Move `{}` from {} to {} in one transaction.", t.field, transition.from.join("|"), transition.to), input_schema(&transition.input), row.clone(), json!({"x-brain-transition":transition,"x-brain-state-field":t.field,"x-brain-system-only":transition.system_only}))}));
             }
         }
     }
@@ -1615,7 +1644,7 @@ pub fn openapi(domain: &Domain, resources: &[Resource], api: &mut Value) {
             }
         }
         let output = json!({"type":"object","required":["operation","result"],"properties":{"operation":{"const":name},"result":{"type":"object","additionalProperties":false,"required":result.keys().collect::<Vec<_>>(),"properties":result}}});
-        paths.insert(format!("/_brain/operations/{name}"), json!({"post": post(format!("operation_{name}"), "Declared domain operation: every step runs in ONE Postgres transaction and any failure rolls all of them back.", input_schema(&op.input), output, json!({"x-brain-roles":op.roles,"x-brain-steps":op.steps}))}));
+        paths.insert(format!("/_brain/operations/{name}"), json!({"post": post(format!("operation_{name}"), "Declared domain operation: every step runs in ONE Postgres transaction and any failure rolls all of them back.", input_schema(&op.input), output, json!({"x-brain-roles":op.roles,"x-brain-system-only":op.system_only,"x-brain-steps":op.steps}))}));
     }
 }
 

@@ -1,0 +1,32 @@
+{
+  "id": "frontend-route-predicates",
+  "kind": "capability",
+  "title": "Bounded raw frontend route predicates",
+  "why": "Exact route parameter and redirect predicates share a deterministic ASCII grammar and preserve raw matching across dev/SSR/SSG/SEO. Unsupported host exports fail explicitly instead of widening rules.",
+  "changelog": [
+    "Frontend route parameter constraints share raw-segment matching"
+  ],
+  "guide": "docs/ROUTE-CONSTRAINTS.md",
+  "apis": [
+    "routeParams",
+    "redirects.json params"
+  ],
+  "affects": [
+    "brain.json",
+    "redirects.json"
+  ],
+  "adopt": {
+    "file": "brain.json",
+    "snippet": "{\"routeParams\":{\"/:code\":{\"code\":\"[2-9a-z]{7}\"}}}"
+  },
+  "uses": [
+    {
+      "glob": "brain.json",
+      "contains": "\"routeParams\""
+    },
+    {
+      "glob": "redirects.json",
+      "contains": "\"params\""
+    }
+  ]
+}

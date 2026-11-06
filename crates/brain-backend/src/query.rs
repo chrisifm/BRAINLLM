@@ -105,11 +105,23 @@ impl SortEntry {
         matches!(self, SortEntry::Spec(SortSpec { nulls: Some(n), .. }) if n == "first")
     }
 }
+/// A legacy scalar group keeps its scalar key; an explicit field list returns an object key.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(untagged)]
+pub enum Group {
+    Field(String),
+    Fields(Vec<String>),
+}
+impl Group {
+    fn fields(&self) -> &[String] {
+        match self { Self::Field(field) => std::slice::from_ref(field), Self::Fields(fields) => fields }
+    }
+}
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Aggregate {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub group: Option<String>,
+    pub group: Option<Group>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sum: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -338,10 +350,20 @@ pub fn validate(r: &Resource) -> Result<(), String> {
         if !crate::contract::identifier(name) {
             return Err(at(format!("aggregate name `{name}` must be an identifier")));
         }
-        if let Some(group) = &aggregate.group
-            && (!matches!(kind(r, group), Some(Kind::Text | Kind::Bool | Kind::Ref | Kind::Date | Kind::Int)) || restricted(r, group))
-        {
-            return Err(at(format!("aggregate `{name}` group `{group}` must be a public str, enum, bool, ref, date or int field")));
+        if let Some(group) = &aggregate.group {
+            let fields = group.fields();
+            let unique: BTreeSet<_> = fields.iter().collect();
+            if fields.is_empty() || fields.len() > 4 || unique.len() != fields.len() {
+                return Err(at(format!("aggregate `{name}` group needs 1..4 distinct fields; fix: use one field name or an array of distinct names")));
+            }
+            for field in fields {
+                if !matches!(kind(r, field), Some(Kind::Text | Kind::Bool | Kind::Ref | Kind::Date | Kind::Int | Kind::List)) || restricted(r, field) {
+                    return Err(at(format!("aggregate `{name}` group `{field}` must be a public str, enum, bool, ref, date, int or list<str> field")));
+                }
+            }
+            if fields.iter().filter(|field| kind(r, field) == Some(Kind::List)).count() > 1 {
+                return Err(at(format!("aggregate `{name}` group permits at most one list<str> field; fix: split multiple list dimensions into separate named aggregates to avoid a Cartesian expansion")));
+            }
         }
         for field in aggregate.sum.iter().chain(&aggregate.avg) {
             if !kind(r, field).is_some_and(Kind::numeric) || restricted(r, field) {
@@ -1752,27 +1774,34 @@ async fn aggregate(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, a: &
         }
     }
     let select: String = columns.iter().enumerate().map(|(i, (_, _, sql))| format!(",{sql} AS _a{i}")).collect();
-    let group = a.group.as_ref().map(|g| {
-        let k = kind(r, g).unwrap_or(Kind::Text);
-        let e = match k {
-            Kind::Ref => format!("{}::text", crate::relations::column(g)),
-            Kind::Text => full_text(g),
-            _ => format!("({})::text", expr(k, g)),
+    let mut joins = String::new();
+    let groups: Vec<_> = a.group.as_ref().into_iter().flat_map(Group::fields).enumerate().map(|(index, field)| {
+        let kind = kind(r, field).unwrap_or(Kind::Text);
+        let expression = match kind {
+            Kind::List => {
+                // Full values, one occurrence per row and distinct element; no cross-product of list dimensions.
+                joins.push_str(&format!(" CROSS JOIN LATERAL (SELECT DISTINCT _value FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(t.data->'{field}')='array' THEN t.data->'{field}' ELSE '[]'::jsonb END) AS _items(_value)) AS _group{index}"));
+                format!("_group{index}._value COLLATE \"C\"")
+            }
+            Kind::Ref => format!("{}::text", crate::relations::column(field)),
+            Kind::Text => full_text(field),
+            _ => format!("({})::text", expr(kind, field)),
         };
-        (k, e)
-    });
+        (field, kind, expression)
+    }).collect();
     let mut q = QueryBuilder::<Postgres>::new("SELECT count(*) AS _n");
     q.push(&select);
-    if let Some((_, e)) = &group {
-        q.push(format!(",{e} AS _g"));
+    for (index, (_, _, expression)) in groups.iter().enumerate() {
+        q.push(format!(",{expression} AS _g{index}"));
     }
-    q.push(format!(" FROM _brain_res_{} t WHERE ", r.name));
+    q.push(format!(" FROM _brain_res_{} t{joins} WHERE ", r.name));
     ctx.push_counted(&mut q);
-    if let Some((_, e)) = &group {
-        q.push(format!(" GROUP BY {e} ORDER BY count(*) DESC,{e} NULLS LAST LIMIT {}", GROUP_LIMIT + 1));
+    if !groups.is_empty() {
+        let keys: Vec<_> = (0..groups.len()).map(|index| format!("_g{index}")).collect();
+        q.push(format!(" GROUP BY {} ORDER BY count(*) DESC,{} LIMIT {}", keys.join(","), keys.iter().map(|key|format!("{key} NULLS LAST")).collect::<Vec<_>>().join(","), GROUP_LIMIT + 1));
     }
     let mut rows = q.build().fetch_all(&mut **tx).await?;
-    let cut = group.is_some() && rows.len() as i64 > GROUP_LIMIT;
+    let cut = !groups.is_empty() && rows.len() as i64 > GROUP_LIMIT;
     rows.truncate(GROUP_LIMIT as usize);
     let render = |row: &sqlx::postgres::PgRow| {
         let mut out = Map::new();
@@ -1788,18 +1817,20 @@ async fn aggregate(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, a: &
         }
         out
     };
-    match group {
-        None => Ok((rows.first().map(|row| Value::Object(render(row))).unwrap_or(json!({"count": 0})), false)),
-        Some((k, _)) => Ok((Value::Array(
-            rows.iter()
-                .map(|row| {
-                    let mut out = render(row);
-                    out.insert("key".into(), group_key(k, row.get("_g")));
-                    Value::Object(out)
-                })
-                .collect(),
-        ), cut)),
+    if groups.is_empty() {
+        return Ok((rows.first().map(|row| Value::Object(render(row))).unwrap_or(json!({"count": 0})), false));
     }
+    Ok((Value::Array(rows.iter().map(|row| {
+        let mut out = render(row);
+        let keys: Vec<_> = groups.iter().enumerate().map(|(index, (field, kind, _))| {
+            (field.to_string(), group_key(*kind, row.get(format!("_g{index}").as_str())))
+        }).collect();
+        let key = if matches!(a.group, Some(Group::Field(_))) {
+            keys.into_iter().next().unwrap().1
+        } else { Value::Object(keys.into_iter().collect()) };
+        out.insert("key".into(), key);
+        Value::Object(out)
+    }).collect()), cut))
 }
 
 /// OpenAPI query parameters for the list route.

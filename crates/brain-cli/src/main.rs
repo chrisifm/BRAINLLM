@@ -37,10 +37,21 @@ mod icons;
 pub(crate) mod map;
 mod mcp;
 mod mcp_setup;
+mod http_observer;
+mod operator_tools;
+mod tooling_bench;
+mod adoption_audit;
+mod tooling_connect;
+mod practices;
 mod agent;
 mod backend;
+mod backfill;
+mod backend_conform;
+mod db_audit;
 mod resource_admin;
 mod analytics;
+mod native_vitals;
+mod google_setup;
 mod api_key_config;
 mod webhook_config;
 mod origin_check;
@@ -51,6 +62,7 @@ mod release_check;
 mod deploy_check;
 mod edge_plan;
 mod seo_live;
+mod seo_diff;
 mod view_links;
 mod platform_config;
 mod route_executor;
@@ -74,6 +86,7 @@ mod manifests;
 mod history;
 mod integrations;
 mod quality;
+mod quality_views;
 mod deployment;
 mod viewer;
 mod dependencies;
@@ -100,6 +113,8 @@ pub(crate) const USAGE: &str = "brain — the BRAINLLM toolchain (every command 
 main:
   brain --version                    prints the version (also -V, --json)
   brain seo <audit|links|preview R>  SEO audit of the built site (score per page, B18xx findings)
+  brain seo preview /route --url <origin> [--json]  inspect one live HTML response
+  brain seo diff --from <sitemap.xml|URL> [--json]  read-only migration coverage against dist/
   brain seo urls [--write]           the committed list of published URLs: a listed one that disappears fails the build
   brain seo audit --url <origin> [--expect-noindex]     the same audit over a running site, with its sitemap, status codes and headers
   brain lighthouse <url>             Lighthouse scores and Core Web Vitals, checked against lighthouse.minScores
@@ -143,20 +158,28 @@ granular:
   brain jobs <enqueue|status|work|stats|prune>  persistent Postgres jobs; workers run server/jobs handlers (`stats` alone lists every queue)
   brain jobs enqueue <queue> --payload '<json>' [--key K] [--priority N] [--delay S]  the payload is JSON in --payload, e.g. brain jobs enqueue order_receipts --payload '{\"order_id\":\"A-17\"}'
   brain design [blueprint|query|check|seed|configure|gallery]  project-owned Design System
-  brain manifest query|refresh        bounded component contracts and revisions
+  brain manifest query|refresh|practices  bounded component contracts, revisions and real compiler practice records
+  brain bench --url <URL> [--requests 3]  bounded anonymous HTTP observations (not browser or cache-state measurement)
+  brain adopt --audit [source-directory]  read-only legacy frontend inventory
+  brain connect                      probe an owned local MCP child and print a client configuration proposal
   brain quality [refresh]             persistent agent improvement JSON/Markdown/panel
   brain history [operation]           project tasks, evidence and proposed lessons
   brain integration list|add|update   reviewed official SDK adapters (preview)
   brain deps analyze|preview|fetch    dependency evidence and explicit pinned CDN acquisition
-  brain deploy config pm2|nginx       guarded front/backend deployment configuration
-  brain edge plan [--json]            what a CDN may keep of this build, rule by rule (read-only)
+  brain deploy config pm2|nginx|github-pages  guarded deployment configuration preview
+  brain db audit [--env development] [--limit 50] [--json]  observe this database/role read-only
+  brain google setup [--env production] [--json]  read-only Google bridge review plan
+  brain edge plan|check|audit|apply [--url <origin>] [--provider cloudflare] [--request plan.json] [--json]  bounded delivery review; explicit reviewed provider apply
   brain deploy check --url <origin>   what only the live server shows: doubled headers, proxy, /health
   brain release-check [--env production] [--url <origin>] [--json]  one gate before a release: doctor, secrets, build output, SEO and the live checks
   brain media setup-gcs|list|cleanup  private media provisioning/library/owned cleanup
   brain e2e probe|run                 opt-in Claude/Codex Viewer scenarios plus AX/heap gates
+  brain backend conform --url <origin> [--path /route] [--json]  bounded anonymous GET/HEAD JSON contract observations
   brain backend <serve|migrate|approve-contract|capabilities|schema|bootstrap-admin|keys|logs>  experimental Rust/Postgres resource API (loopback); serve --with-workers also runs the queues
+  brain data backfill <name> --env <name> [--limit 100] [--apply --request plan.json] [--json]  deterministic checkpointed operator backfill
   brain data defaults [--resource <name>] [--limit <1..10000>] [--include-null] [--apply] preview or fill missing declared defaults in bounded batches
   brain data prepare|maintain [--apply] after an import or periodically: statistics on declared filters, lz4 storage, vacuum, warm-up and a buffers-per-row gate; prepare also rewrites stored rows
+  brain vitals report --env development --days 7 --json  read-only native document-performance aggregates
   brain analytics <report|funnel|segment>  usage reports over the behavior events the backend stores
   brain risk <name> [--measure]       what changing a symbol can break, with its evidence
   brain mcp [--profile full|minimal|backend]  the same commands as MCP tools over stdio
@@ -264,7 +287,10 @@ fn main() -> ExitCode {
             println!("{out}");
             return ExitCode::from(code.clamp(0, 255) as u8);
         }
-        Some("edge") => app_root().and_then(|root| edge_plan::run(&root, &positional(&args[1..], &[]), want_json(&args))),
+        Some("bench" | "adopt" | "connect") => return tooling_command(&args[0], &args[1..]),
+        Some("db") => return db_audit::entry(&args[1..]),
+        Some("google") => return google_setup::entry(&args[1..]),
+        Some("edge") => { let (code, out) = edge_plan::command(app_root(), &args[1..], want_json(&args)); if code != 0 && !want_json(&args) { eprintln!("{out}"); } else { println!("{out}"); } return ExitCode::from(code); },
         Some("deploy") if args.get(1).map(String::as_str) == Some("check") => {
             let (code, out) = deploy_check::run(app_root().ok().as_deref(), &args[2..]);
             println!("{out}");
@@ -280,10 +306,17 @@ fn main() -> ExitCode {
         },
         Some("design") | Some("manifest") => project_metadata(&args),
         Some("upgrade") => return cmd_upgrade(&args[1..]),
+        Some("backend") if args.get(1).is_some_and(|value| value == "conform") => {
+            let (code, out) = backend_conform::run(&args[2..]);
+            println!("{out}");
+            return ExitCode::from(code.clamp(0, 255) as u8);
+        }
         Some("backend") => backend::run(&args[1..]),
+        Some("data") if args.get(1).is_some_and(|arg|arg=="backfill") => return backfill::entry(&args[2..]),
         Some("data") => backend::run(&args),
         Some("jobs") => backend::jobs(&args[1..]),
         Some("analytics") => analytics::run(&args[1..]),
+        Some("vitals") => native_vitals::run(&args[1..]),
         Some("media") => backend::media(&args[1..]),
         Some("agent") => {
             if args.get(1).map(String::as_str) != Some("setup") || args.iter().skip(2).any(|s| !matches!(s.as_str(), "--hooks" | "--json")) {
@@ -418,6 +451,11 @@ fn main() -> ExitCode {
             println!("{out}");
             return ExitCode::from(code.clamp(0, 255) as u8);
         }
+        Some("seo") if args.get(1).is_some_and(|arg| arg == "diff") => {
+            let (code, out) = seo_diff::run(app_root().ok().as_deref(), &args[1..]);
+            println!("{out}");
+            return ExitCode::from(code.clamp(0, 255) as u8);
+        }
         Some("seo") if args[1..].iter().any(|a| a == "--url" || a.starts_with("--url=")) => {
             let (code, out) = seo_live::run(app_root().ok().as_deref(), &args[1..]);
             println!("{out}");
@@ -491,6 +529,22 @@ fn main() -> ExitCode {
             }
             ExitCode::from(if backend::failed_on_configuration() { backend::CONFIG_EXIT } else { 2 })
         }
+    }
+}
+
+fn tooling_command(command: &str, args: &[String]) -> ExitCode {
+    let result = match command {
+        "bench" => tooling_bench::run(args),
+        "adopt" => adoption_audit::run(args),
+        "connect" => {
+            if !positional(args, &[]).is_empty() { Err("usage: brain connect [--json]".into()) }
+            else { app_root().and_then(|root| std::env::current_exe().map_err(|_| "cannot resolve current brain executable".to_string()).and_then(|exe|tooling_connect::run(&root,&exe))) }
+        },
+        _ => Err("unknown tooling command".into()),
+    };
+    match result {
+        Ok(value) => { let code = if value["ok"] == false {1} else {0}; println!("{value}"); ExitCode::from(code) },
+        Err(error) => { if want_json(args) {println!("{}",error_json(&error));} else {eprintln!("error: {error}");} ExitCode::from(2) },
     }
 }
 
@@ -904,6 +958,14 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
                 let mut diag = compiler::Diag::new("B0784", "server/platform.jsbrain", brain_parse::Span::default(), message, fix);
                 diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
             }
+            // Explicit frontend route constraints share the pack and redirect validators (B1880).
+            for (file,result) in [("brain.json",brain_pack::routes::check_constraints(&app)),("redirects.json",brain_seo::redirects::check_constraints(&app))] {
+                if let Err(message)=result {
+                    let (msg,fix)=message.split_once("; fix: ").unwrap_or((message.as_str(),"use unique parameters and bounded deterministic ASCII patterns"));
+                    let mut diag=compiler::Diag::new("B1880",file,brain_parse::Span::default(),msg.to_string(),fix.to_string());
+                    diag.line=1;diag.col=1;diags.push(diag);
+                }
+            }
             // brain.json `server` (B0707): body, time and rate limits shared by brain run and the production server
             if let Err(message) = brain_pack::read_server_limits(&app) {
                 let (msg, fix) = message.split_once("; fix: ").unwrap_or((message.as_str(), "set whole numbers in range"));
@@ -933,7 +995,7 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
 
 /// `brain.json` → `"lint": {<code>: "off" | "info" | "warning" | "error"}` (INTERNALS §20): the quality families
 /// (B09xx loops, B10xx dead code, B11xx async, B12xx compatibility, B13xx practices) can be lowered or turned off;
-/// encapsulation, accessibility, SEO, security, channels and every compile error cannot (an override there is ignored).
+/// optional WebMCP B1706/7/8 advice accepts off/info/warning only. Security and tool contracts cannot be lowered.
 fn apply_lint(app: &Path, diags: &mut Vec<compiler::Diag>) {
     let Some(rules) = lint_rules(app) else { return };
     diags.retain_mut(|d| {
@@ -941,7 +1003,8 @@ fn apply_lint(app: &Path, diags: &mut Vec<compiler::Diag>) {
         if !lint_adjustable(d.code) {
             return true;
         }
-        d.level = match lvl.as_str() {
+        let level = if practices::nudge(d.code) { practices::nudge_level(d.code,Some(lvl.as_str()),d.level.as_str()) } else { lvl.as_str() };
+        d.level = match level {
             "off" => return false,
             "info" => brain_parse::Severity::Info,
             "warning" => brain_parse::Severity::Warning,
@@ -960,7 +1023,7 @@ pub(crate) fn lint_rules(app: &Path) -> Option<Vec<(String, String)>> {
 }
 
 fn lint_adjustable(code: &str) -> bool {
-    matches!(code.get(..3), Some("B09" | "B10" | "B11" | "B12" | "B13"))
+    practices::adjustable(code)
 }
 
 /// Stuck-loop protection (INTERNALS §25): how many fix attempts each diagnostic (code + place) has survived. An attempt
@@ -1887,6 +1950,7 @@ fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, re
     let socket_settings: backend::SocketSettings = backend::socket_settings(root, site, None)?;
     let mut socket_options = socket_settings.build_options(site).map_err(|e| format!("{e}. This `{env_name}` build took the site from --site or PUBLIC_SITE_URL in the [{env_name}] section of .brain_env"))?;
     socket_options.static_export = rep.static_export;
+    socket_options.native_vitals = native_vitals::build_options(root, env_name)?;
     socket_options.native_routes = route_executor::gateway_routes(root)?;
     socket_options.trust_proxy = platform_config::trust_proxy(root);
     socket_options.access = platform_config::access(root);
@@ -2585,14 +2649,16 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
     let app = root.as_deref().map(|p| std::path::absolute(p).unwrap_or(p.to_path_buf())).and_then(|p| scaffold::find_root(&p)).or_else(|| app_root().ok());
     // the production build (§25: done = doctor exit 0 = the app ships): what fails `brain build` fails doctor too —
     // empty production keys (B0720), broken links and anchors (B1819/B1820)… — and SEO then audits that dist/
-    // a placeholder production origin is reported once (B0736 below); the audit still scores the pages as they would
-    // ship with a real domain, so one missing domain does not also fail SEO through relative canonical/og:image URLs
-    let doctor_site = app.as_deref().and_then(|a| env::value(a, "production", "PUBLIC_SITE_URL")).filter(|s| env::placeholder_origin(s));
+    // Budget evidence uses exactly production build inputs. A placeholder-only SEO simulation is separate below;
+    // it must never replace the HTML bytes, signature or payload budget of the actual production artifact.
+    let doctor_site = app.as_deref().and_then(|a| declared_site(a, "production")).filter(|s| env::placeholder_origin(s));
     let mut doctor_output = None;
+    let mut doctor_seo_model = None;
+    let mut doctor_seo_model_error = None;
     let (build_ok, fresh_output, mut build) = match &app {
         Some(a) if check.get("errors") == Some(&Json::Num(0.0)) => {
             let output = DoctorOutput::create()?;
-            let result = run_build_mode_to(a, doctor_site.clone(), "production", None, false, &output.0);
+            let result = run_build_mode_to(a, None, "production", None, false, &output.0);
             doctor_output = Some(output);
             match result {
                 Ok(assessment) => (assessment.budget_error.is_none(), true, assessment.doctor_json()),
@@ -2605,10 +2671,21 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
     if let Json::Obj(fields) = &mut build {
         fields.push(("outputScope".into(), Json::str("isolated-doctor-output")));
         fields.push(("outputRetained".into(), Json::Bool(false)));
+        fields.push(("matchesProductionBuildInputs".into(), Json::Bool(true)));
     }
-    let (seo_ok, seo) = match &app {
+    if fresh_output && let (Some(app), Some(site)) = (&app, &doctor_site) {
+        // Preserve the established placeholder SEO model without changing measured production output. This second
+        // isolated build is explicit diagnostic modeling only; its larger absolute URLs are not budget evidence.
+        let output = DoctorOutput::create()?;
+        match run_build_mode_to(app, Some(site.clone()), "production", None, false, &output.0) {
+            Ok(_) => doctor_seo_model = Some(output),
+            Err(error) => doctor_seo_model_error = Some(error.message),
+        }
+    }
+    let (seo_ok, mut seo) = match &app {
+        Some(_) if doctor_seo_model_error.is_some() => (false, Json::obj([("ok", Json::Bool(false)), ("error", Json::str(doctor_seo_model_error.as_deref().unwrap()))])),
         Some(a) if fresh_output && doctor_output.is_some() => {
-            let (code, out) = brain_seo::audit_output(a, &doctor_output.as_ref().unwrap().0);
+            let (code, out) = brain_seo::audit_output(a, &doctor_seo_model.as_ref().or(doctor_output.as_ref()).unwrap().0);
             // no .brain_env value in doctor's output (§36): the audit's absolute URLs carry PUBLIC_SITE_URL, so they
             // become paths (`https://example.com/about` → `/about`)
             let out = match env::value(a, "production", "PUBLIC_SITE_URL") {
@@ -2620,6 +2697,11 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
         _ if !fresh_output => (true, Json::obj([("skipped", Json::str("no fresh build output from this doctor run; fix check/build errors before SEO can audit the current pages"))])),
         _ => (true, Json::obj([("skipped", Json::str("no dist/ yet; run `brain build` to audit SEO"))])),
     };
+    if let Json::Obj(fields) = &mut seo {
+        fields.push(("outputScope".into(), Json::str(if doctor_seo_model.is_some() { "placeholder-origin-model" } else { "actual-production-build" })));
+        fields.push(("usedForPayloadBudget".into(), Json::Bool(false)));
+        fields.push(("matchesProductionBuildOutput".into(), Json::Bool(doctor_seo_model.is_none())));
+    }
     let (static_ok, static_artifact) = match app.as_deref() {
         Some(a) if fresh_output && static_export::enabled(a, false)? => match doctor_output.as_ref().map_or_else(|| static_audit::audit(a), |output| static_audit::audit_output(a, &output.0)) {
             Ok(report) => (report.get("ok") == Some(&Json::Bool(true)), report),
@@ -2643,8 +2725,10 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
     }
     if let Some(a) = &app {
         let covered: Vec<String> = brain_check::webmcp::coverage(a).into_iter().map(|(view, exposed, actions)| format!("{view} {exposed} of {actions}")).collect();
-        if !covered.is_empty() {
-            advice.push(Json::obj([("code", Json::str("B1708")), ("level", Json::str("info")), ("file", Json::str("views/")), ("msg", Json::str(&format!("actions exposed to agents per route: {}", covered.join(", ")))), ("fix", Json::str("expose what an agent acting for the user would otherwise have to guess; not every form should be a tool (`brain guide webmcp`)"))]));
+        let rules = lint_rules(a).unwrap_or_default();
+        let level = practices::nudge_level("B1708",rules.iter().find(|(code,_)|code=="B1708").map(|(_,level)|level.as_str()),"info");
+        if !covered.is_empty() && level != "off" {
+            advice.push(Json::obj([("code", Json::str("B1708")), ("level", Json::str(level)), ("file", Json::str("views/")), ("msg", Json::str(&format!("actions exposed to agents per route: {}", covered.join(", ")))), ("fix", Json::str("expose what an agent acting for the user would otherwise have to guess; not every form should be a tool (`brain guide webmcp`)"))]));
         }
         for (msg, fix, _) in platform_config::proxy_findings(a, env::value(a, "production", "PUBLIC_SITE_URL").as_deref()) {
             advice.push(Json::obj([("code", Json::str("B0784")), ("level", Json::str("warning")), ("file", Json::str("server/platform.jsbrain")), ("msg", Json::str(msg)), ("fix", Json::str(fix))]));
@@ -3095,6 +3179,7 @@ fn project_metadata(args: &[String]) -> Result<(), String> {
     let values:Vec<&str> = positional_values.iter().map(String::as_str).collect();
     let request=serde_json::from_str(&flag(args,"--request").unwrap_or_else(||"{}".into())).map_err(|_|"design request must be JSON")?;
     if values.iter().any(|s|s.starts_with('-')) {return Err("usage: brain design [init|check|gallery|component] [--json] | brain manifest [refresh|file] [--json]".into());}
+    if args[0] == "manifest" && values.as_slice() == ["practices"] { println!("{}",practices::query(&request)?); return Ok(()); }
     let root=app_root()?;
     let result=match (args[0].as_str(),values.as_slice()) {
         ("design",[]) | ("design",["query"])=>design::query(&root,None)?,

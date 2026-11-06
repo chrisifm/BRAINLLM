@@ -1,0 +1,27 @@
+{
+  "id": "redis-ssr-cache",
+  "kind": "capability",
+  "title": "Optional private Redis cache",
+  "why": "Public cached SSR can share bounded standalone RESP2 Redis entries with private runtime credentials, TTL, build/host/base isolation and safe miss degradation. DNS leases, headers and cleanup remain bounded.",
+  "changelog": [
+    "Optional Redis cache shares eligible public SSR entries"
+  ],
+  "guide": "docs/REDIS-CACHE.md",
+  "apis": [
+    "REDIS_URL",
+    "BRAIN_REDIS_NAMESPACE"
+  ],
+  "affects": [
+    ".brain_env"
+  ],
+  "adopt": {
+    "file": ".brain_env",
+    "snippet": "REDIS_URL=redis://127.0.0.1:6379/0\nBRAIN_REDIS_NAMESPACE=example-app"
+  },
+  "uses": [
+    {
+      "glob": ".brain_env",
+      "contains": "BRAIN_REDIS_NAMESPACE"
+    }
+  ]
+}

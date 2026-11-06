@@ -15,6 +15,17 @@ pub const OPERATOR_HEADER: &str = "x-brain-operator-key";
 const OPERATOR_KEY_MIN: usize = 32;
 /// Published provider test secrets: local only; pass/fail/spent fixtures are not production configuration.
 const TEST_SECRETS: &[&str] = &["1x0000000000000000000000000000000AA", "2x0000000000000000000000000000000AA", "3x0000000000000000000000000000000AA", "0x0000000000000000000000000000000000000000", "6LeIxAcTAAAAAGG-vFI1TnRWxMZNFuojJ4WifJWe"];
+/// Public provider fixtures, not account credentials. Verified against the providers' official testing docs
+/// on 2026-11-06: Cloudflare `/turnstile/troubleshooting/testing/`, hCaptcha `/`, Google `/recaptcha/docs/faq`.
+/// A server-only contract cannot know which site key the browser receives; the CLI checks proven client bindings.
+pub fn public_test_site_key(key: &str) -> Option<&'static str> {
+    match key {
+        "1x00000000000000000000AA" | "2x00000000000000000000AB" | "1x00000000000000000000BB" | "2x00000000000000000000BB" | "3x00000000000000000000FF" => Some("Turnstile"),
+        "10000000-ffff-ffff-ffff-000000000001" | "20000000-ffff-ffff-ffff-000000000002" | "30000000-ffff-ffff-ffff-000000000003" => Some("hCaptcha"),
+        "6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI" => Some("reCAPTCHA"),
+        _ => None,
+    }
+}
 const AUTH_ACTIONS: &[&str] = &["signup", "login", "password_request"];
 const MAX_TOKEN: usize = 8192;
 const MAX_ANSWER: usize = 64 * 1024;
@@ -225,5 +236,25 @@ mod tests {
         assert!(check(operated.clone(), "synthetic-captcha-secret", None).unwrap_err().contains("OPERATOR_KEY"));
         assert!(check(operated.clone(), "synthetic-captcha-secret", Some("short")).unwrap_err().contains("OPERATOR_KEY"));
         assert!(check(operated, "synthetic-captcha-secret", Some(KEY)).is_ok());
+    }
+
+    #[test]
+    fn public_site_key_fixtures_are_distinct_from_secrets_and_real_keys() {
+        let fixtures = [
+            ("1x00000000000000000000AA", "Turnstile"), ("2x00000000000000000000AB", "Turnstile"),
+            ("1x00000000000000000000BB", "Turnstile"), ("2x00000000000000000000BB", "Turnstile"),
+            ("3x00000000000000000000FF", "Turnstile"),
+            ("10000000-ffff-ffff-ffff-000000000001", "hCaptcha"),
+            ("20000000-ffff-ffff-ffff-000000000002", "hCaptcha"),
+            ("30000000-ffff-ffff-ffff-000000000003", "hCaptcha"),
+            ("6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI", "reCAPTCHA"),
+        ];
+        for (key, provider) in fixtures {
+            assert_eq!(public_test_site_key(key), Some(provider));
+            assert_eq!(public_test_site_key(&format!("{key}-suffix")), None);
+        }
+        for key in TEST_SECRETS.iter().copied().chain(["synthetic-provider-issued-site-key", ""]) {
+            assert_eq!(public_test_site_key(key), None);
+        }
     }
 }

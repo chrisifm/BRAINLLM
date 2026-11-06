@@ -1,0 +1,26 @@
+{
+  "id": "aggregate-dimensions",
+  "kind": "capability",
+  "title": "List and compound aggregate dimensions",
+  "why": "Named aggregates group over the complete policy-filtered row set using distinct list elements or up to four dimensions with at most one list. Scalar keys remain compatible; compound keys are objects.",
+  "changelog": [
+    "Named aggregates support deduplicated list and compound groups"
+  ],
+  "guide": "docs/backend/aggregates.md",
+  "apis": [
+    "aggregate.group"
+  ],
+  "affects": [
+    "server/resources/*/query.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/resources/products/query.jsbrain",
+    "snippet": "<meta server>\nexport default { aggregate: { by_category: { group: 'category' } } }"
+  },
+  "uses": [
+    {
+      "glob": "server/resources/*/query.jsbrain",
+      "contains": "group:"
+    }
+  ]
+}

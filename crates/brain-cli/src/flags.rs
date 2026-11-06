@@ -26,7 +26,7 @@ pub(crate) const TABLE: &[(&str, &[&str], &[&str])] = &[
     ("schema", &[], &[]),
     ("theme", &[], &["--list"]),
     ("i18n", &[], &["--missing"]),
-    ("seo", &["--since", "--env", "--url", "--sample", "--path", "--delay-ms"], &["--dry-run", "--expect-noindex", "--write"]),
+    ("seo", &["--since", "--env", "--url", "--sample", "--path", "--delay-ms", "--from"], &["--dry-run", "--expect-noindex", "--write"]),
     ("lighthouse", &["--preset", "--chrome-flags"], &["--expect-noindex"]),
     ("stop", &[], &[]),
     ("reload", &[], &[]),
@@ -41,20 +41,23 @@ pub(crate) const TABLE: &[(&str, &[&str], &[&str])] = &[
     ("deps", &["--request", "--file"], &[]),
     ("feedback", &["--request"], &[]),
     ("quality", &[], &[]),
-    ("edge", &[], &[]),
+    ("edge", &["--url", "--provider", "--request"], &[]),
     ("deploy", &["--request", "--url"], &[]),
     ("release-check", &["--env", "--url"], &[]),
     ("design", &["--request"], &[]),
     ("manifest", &["--request"], &[]),
+    ("bench", &["--url", "--requests"], &[]),
+    ("adopt", &[], &["--audit"]),
+    ("connect", &[], &[]),
     (
         "backend",
         &[
             "--env", "--port", "--origin", "--from", "--to", "--user", "--email", "--provider", "--name", "--scopes", "--expires-days", "--daily",
-            "--monthly", "--status", "--resource", "--before", "--limit", "--days", "--accept", "--only", "--file",
+            "--monthly", "--status", "--resource", "--before", "--limit", "--days", "--accept", "--only", "--file", "--url", "--path",
         ],
         &["--apply", "--with-workers", "--system", "--create-db", "--include-null"],
     ),
-    ("data", &["--env", "--resource", "--limit"], &["--apply", "--include-null"]),
+    ("data", &["--env", "--resource", "--limit", "--request"], &["--apply", "--include-null"]),
     ("jobs", &["--env", "--payload", "--key", "--priority", "--delay", "--id", "--concurrency"], &["--once"]),
     ("analytics", &["--env", "--since", "--days", "--viewed", "--min-views", "--within", "--not-viewed", "--tracked", "--signed-in", "--limit", "--user"], &["--csv"]),
     ("media", &["--env", "--owner", "--limit", "--offset"], &[]),
@@ -63,6 +66,10 @@ pub(crate) const TABLE: &[(&str, &[&str], &[&str])] = &[
 /// `Err` names the first flag the command does not know and what it does accept. A `--` ends the flags.
 pub(crate) fn check(args: &[String]) -> Result<(), String> {
     let Some((command, rest)) = args.split_first() else { return Ok(()) };
+    if command=="data" && rest.first().is_some_and(|arg|arg=="backfill") { return Ok(()) } // strict backfill parser owns its flags
+    // The command catalog is a union; a reviewed request belongs only to the strict backfill subcommand.
+    if command=="data" && rest.iter().take_while(|arg|arg.as_str()!="--").any(|arg|arg=="--request" || arg.starts_with("--request=")) { return Err("--request belongs to brain data backfill; ordinary data commands do not accept it".into()); }
+
     let Some((_, valued, switches)) = TABLE.iter().find(|(name, ..)| name == command) else { return Ok(()) };
     let mut tokens = rest.iter();
     while let Some(token) = tokens.next() {
@@ -109,6 +116,16 @@ mod tests {
         for args in [&["seo", "audit", "--site", "https://example.dev"][..], &["seo", "--site=https://example.dev"]] {
             let e = run(args).unwrap_err();
             assert!(e.contains("brain build --site https://your-domain") && e.contains("--url"), "{e}");
+        }
+    }
+
+    #[test]
+    fn backfill_request_metadata_does_not_broaden_other_data_commands() {
+        assert!(run(&["data","backfill","labels","--env","development","--apply","--request","plan.json"]).is_ok());
+        assert!(run(&["data","defaults","--","--request"]).is_ok());
+        for operation in ["defaults","prepare","maintain"] {
+            assert!(run(&["data",operation,"--request","plan.json"]).is_err());
+            assert!(run(&["data",operation,"--request=plan.json"]).is_err());
         }
     }
 

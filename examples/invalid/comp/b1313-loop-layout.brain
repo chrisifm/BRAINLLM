@@ -1,0 +1,13 @@
+<script>
+const rows = [1, 2]
+let panel = ref()
+mounted(() => {
+  if (panel) {
+    for (const row of rows) {
+      panel.style.width = row + 'px'
+      const width = panel.offsetWidth
+    }
+  }
+})
+</script>
+<div bind:ref={panel}>Example panel</div>

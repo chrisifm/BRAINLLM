@@ -4,6 +4,9 @@ use brain_backend::{Resource, auth_flows::RolesConfig, cluster::Cluster, files::
 use serde_json::{Value, json};
 use std::{fs, path::Path};
 
+#[path = "captcha_site_keys.rs"]
+mod captcha_site_keys;
+
 const FILES: &str = "server/files";
 const EDGE: &str = "server/platform.jsbrain";
 
@@ -132,12 +135,22 @@ pub(crate) fn captcha_secret_problem(root: &Path, environment: &str) -> Option<(
 pub(crate) fn captcha_public_test_secret_problem(root: &Path, environment: &str) -> Option<(String, String, bool)> {
     if environment != "production" { return None; }
     let config = captcha(root, environment).ok()?;
-    let name = config.public_test_secret()?;
+    if !config.enabled() { return None; }
+    let Some(name) = config.public_test_secret() else { return captcha_site_keys::problem(root, environment); };
     let file = brain_backend::captcha::CONTRACT;
     Some((file.into(), format!("{file}: [production] {name} holds a public provider test secret; `brain backend serve --env production` refuses to start"), false))
 }
 
+/// A provider-named test site key without a proven client binding: advisory, never a boot refusal.
+pub(crate) fn captcha_public_test_site_key_warning(root: &Path, environment: &str) -> Option<(String, String)> {
+    if !captcha(root, environment).ok()?.enabled() { return None; }
+    captcha_site_keys::unbound_problem(root, environment)
+}
+
 pub fn load(root: &Path, environment: &str, resources: &[Resource], roles: &RolesConfig) -> Result<Platform, String> {
+    if let Some((_, message, _)) = captcha_public_test_secret_problem(root, environment) {
+        return Err(format!("{message}; fix: configure provider-issued site and secret keys for production; keep public test keys in development/testing only"));
+    }
     let (edge, cluster) = edge(root)?;
     Ok(Platform { buckets: buckets(root, resources, roles)?, edge, cluster, cache: cache(root, resources)?, organizations: organizations(root)?, captcha: captcha(root, environment)?, ..Default::default() })
 }

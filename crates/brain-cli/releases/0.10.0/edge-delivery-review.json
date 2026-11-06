@@ -1,0 +1,29 @@
+{
+  "id": "edge-delivery-review",
+  "kind": "capability",
+  "title": "Declared and observed edge delivery",
+  "why": "Bounded anonymous delivery checks compare the build contract with observed headers. Explicit Cloudflare changes require a reviewed origin/build/revision-bound plan and preserve unrelated rules.",
+  "changelog": [
+    "Edge plan/check/audit compares delivery with the build contract"
+  ],
+  "guide": "docs/EDGE.md",
+  "apis": [
+    "brain edge plan",
+    "brain edge audit",
+    "brain edge apply"
+  ],
+  "affects": [
+    "package.json"
+  ],
+  "adopt": {
+    "file": "package.json",
+    "snippet": "{\"scripts\":{\"edge:plan\":\"brain edge plan --json\"}}",
+    "command": "brain edge plan --json"
+  },
+  "uses": [
+    {
+      "glob": "package.json",
+      "contains": "brain edge"
+    }
+  ]
+}

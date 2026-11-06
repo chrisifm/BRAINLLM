@@ -1,0 +1,7 @@
+<script>
+const shared = [1, 2]
+const rows = [1, 2]
+</script>
+{#each rows as row (row)}
+  <p>{row}: {shared.filter(value => value > 1).length}</p>
+{/each}

@@ -37,7 +37,8 @@ export function start(config = {}, env = globalThis) {
   const win = env.window || env
   const nav = env.navigator || {}
   const loc = () => env.location || { pathname: '/', search: '', href: '/', origin: '' }
-  const store = env.localStorage
+  let store
+  try { store = env.localStorage } catch {} // some browsers block access to the storage object itself
   const now = () => (env.performance ? env.performance.now() : Date.now())
   if (!doc || config.enabled === false) return null
   if (nav.globalPrivacyControl === true || nav.doNotTrack === '1' || win.doNotTrack === '1' || nav.webdriver) return null
@@ -45,7 +46,9 @@ export function start(config = {}, env = globalThis) {
   const consented = () => {
     if (config.consent !== 'required') return true
     try {
-      return !!(JSON.parse(store.getItem('brain:consent')) || {}).analytics
+      const memory = env[Symbol.for('brain:consent-state')]
+      if (memory && Object.hasOwn(memory, 'analytics')) return memory.analytics === true
+      return (JSON.parse(store.getItem('brain:consent')) || {}).analytics === true
     } catch {
       return false
     }
@@ -193,9 +196,11 @@ export function start(config = {}, env = globalThis) {
   let maxScroll = 0
   let path = loc().pathname
   let stopped = false
+  let consentEpoch = 0
   const send = () => {
     clearTimeout(timer)
     timer = null
+    if (!consented()) { discardDenied(); return }
     if (!queue.length) return
     const vid = ids()
     while (queue.length) {
@@ -267,9 +272,25 @@ export function start(config = {}, env = globalThis) {
   const listen = (t, f, target = doc) => {
     if (!target.addEventListener) return
     const o = { capture: true, passive: true }
-    target.addEventListener(t, f, o)
-    off.push(() => target.removeEventListener(t, f, o))
+    const listener = /^(brain:consent|storage|popstate|visibilitychange|pagehide)$/.test(t) ? f : event => { if (consented()) f(event) }
+    target.addEventListener(t, listener, o)
+    off.push(() => target.removeEventListener(t, listener, o))
   }
+  const discardDenied = () => {
+    if (!consented()) {
+      queue.length = 0; clearTimeout(timer); timer = null; pv = 0; consentEpoch++
+      clicks.length = 0; focused.clear(); typed.clear()
+      if (hover) clearTimeout(hover.t)
+      hover = null
+    }
+  }
+  listen('brain:consent', discardDenied, win)
+  listen('storage', event => {
+    if (event.key === 'brain:consent' || event.key === null) {
+      delete env[Symbol.for('brain:consent-state')]
+      discardDenied()
+    }
+  }, win)
   const clicks = []
   let mutations = 0
   const Observer = env.MutationObserver
@@ -291,7 +312,9 @@ export function start(config = {}, env = globalThis) {
       const seen = changes()
       const href = loc().href
       const active = doc.activeElement
+      const epoch = consentEpoch
       setTimeout(() => {
+        if (epoch !== consentEpoch) return
         if (changes() === seen && loc().href === href && doc.activeElement === active) record('dead', el)
       }, DEAD_MS)
     }
@@ -357,7 +380,8 @@ export function start(config = {}, env = globalThis) {
     const el = actionable(e.target)
     if (!el || hovered.has(el) || (hover && hover.el === el)) return
     if (hover) clearTimeout(hover.t)
-    hover = { el, t: setTimeout(() => (hovered.add(el), (hover = null), record('hover', el, HOVER_MS)), HOVER_MS) }
+    const epoch = consentEpoch
+    hover = { el, t: setTimeout(() => { if (epoch === consentEpoch) { hovered.add(el); hover = null; record('hover', el, HOVER_MS) } }, HOVER_MS) }
   })
   listen('pointerout', e => {
     if (hover && actionable(e.target) === hover.el) clearTimeout(hover.t), (hover = null)

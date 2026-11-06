@@ -38,6 +38,7 @@ fn sealed() -> Resource {
 }
 fn config(resources: Vec<Resource>) -> brain_backend::Config {
     brain_backend::Config {
+        vitals: None,
         api_keys: Some(Default::default()),
         resources,
         jobs: vec![],
@@ -45,7 +46,7 @@ fn config(resources: Vec<Resource>) -> brain_backend::Config {
         origins: vec![ORIGIN.into()],
         production: false,
         jwt: None,
-        google: None, apple: None, linkedin: None,
+        google: None, apple: None, apple_native: None, linkedin: None,
         gcs: None,
         roles: Default::default(),
         mail: None,
@@ -102,13 +103,17 @@ async fn system_identity_is_operator_only_audited_and_no_other_key_reaches_it() 
     let notes = sealed();
     db::migrate(&pool, std::slice::from_ref(&notes)).await.unwrap();
     let auth = Auth::new(pool.clone()).await.unwrap();
-    let domain: brain_backend::domain::Domain = serde_json::from_value(json!({"resources":{"sys_notes":{"actions":{"bump":{"roles":["owner"],"increment":{"hits":1}}}}},"operations":{}})).unwrap();
-    let (router, _) = brain_backend::http::router_with_domain(pool.clone(), config(vec![notes]), domain).await.unwrap();
+    let domain: brain_backend::domain::Domain = serde_json::from_value(json!({"resources":{"sys_notes":{"actions":{"bump":{"roles":["owner"],"increment":{"hits":1}},"system_bump":{"systemOnly":true,"increment":{"hits":3}}}}},"operations":{"system_read":{"systemOnly":true,"input":{"id":"str!"},"steps":[{"as":"note","read":"sys_notes","id":"$input.id"}]}}})).unwrap();
+    let mut settings = config(vec![notes]);
+    settings.roles.roles.push("system".into());
+    settings.roles.register(&pool).await.unwrap();
+    let (router, _) = brain_backend::http::router_with_domain(pool.clone(), settings, domain).await.unwrap();
     let keys = Keys::new(pool.clone(), Default::default()).unwrap();
     let (author, _) = user(&auth, &pool, "user").await;
     let (member, _) = user(&auth, &pool, "user").await;
     let (admin, admin_session) = user(&auth, &pool, "admin").await;
     let (operator, operator_session) = user(&auth, &pool, "user").await;
+    let (_, system_named_session) = user(&auth, &pool, "system").await;
     let scopes = ["sys_notes:*"];
     let (_, author_key) = keys.create(author, new_key(&scopes)).await.unwrap().unwrap();
     let (_, member_key) = keys.create(member, new_key(&scopes)).await.unwrap().unwrap();
@@ -134,6 +139,36 @@ async fn system_identity_is_operator_only_audited_and_no_other_key_reaches_it() 
     assert_eq!(created.0, StatusCode::OK, "{}", created.1);
     let id = created.1["id"].as_str().unwrap().to_string();
     let row = format!("/api/sys_notes/{id}");
+    let system_action = format!("{row}/actions/system_bump");
+    for key in [&author_key, &admin_key] {
+        assert_eq!(call(&router, keyed("POST", &system_action, key, Some(json!({})))).await.0, StatusCode::FORBIDDEN);
+    }
+    assert_eq!(call(&router, session("POST", &system_action, &admin_session, Some(json!({})))).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(call(&router, session("POST", &system_action, &system_named_session, Some(json!({})))).await.0, StatusCode::FORBIDDEN, "a role named system is not a system credential");
+    assert_eq!(call(&router, keyed("POST", &system_action, &system_key, Some(json!({})))).await.0, StatusCode::OK);
+
+    // System-only operations require an operator-issued, explicitly scoped system key; an admin is not system.
+    let operation = "/_brain/operations/system_read";
+    let input = json!({"id":id});
+    for token in [&admin_session, &operator_session, &system_named_session] {
+        assert_eq!(call(&router, session("POST", operation, token, Some(input.clone()))).await.0, StatusCode::FORBIDDEN);
+    }
+    let operation_scope = ["operations.system_read:write"];
+    let (_, ordinary_operation) = keys.create(admin, new_key(&operation_scope)).await.unwrap().unwrap();
+    assert_eq!(call(&router, keyed("POST", operation, &ordinary_operation, Some(input.clone()))).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(call(&router, keyed("POST", operation, &system_key, Some(input.clone()))).await.0, StatusCode::FORBIDDEN, "system resource scope must not grant a domain operation");
+    let (operation_info, operation_key) = keys.create_system(operator, new_key(&operation_scope)).await.unwrap().unwrap();
+    let executed = call(&router, keyed("POST", operation, &operation_key, Some(input.clone()))).await;
+    assert_eq!(executed.0, StatusCode::OK, "{}", executed.1);
+    assert_eq!(executed.1["result"]["note"]["id"], id);
+    let operation_id = Uuid::parse_str(operation_info["id"].as_str().unwrap()).unwrap();
+    keys.revoke(operation_id, None).await.unwrap();
+    assert_ne!(call(&router, keyed("POST", operation, &operation_key, Some(input))).await.0, StatusCode::OK, "revocation must remove system operation authority");
+
+    let (expired_info, expired_key) = keys.create_system(operator, new_key(&scopes)).await.unwrap().unwrap();
+    let expired_id = Uuid::parse_str(expired_info["id"].as_str().unwrap()).unwrap();
+    sqlx::query("UPDATE public._brain_api_keys SET expires_at=now()-interval '1 second' WHERE id=$1").bind(expired_id).execute(&pool).await.unwrap();
+    assert_eq!(call(&router, keyed("GET", &row, &expired_key, None)).await.1["error"]["code"], "API_KEY_EXPIRED");
 
     // Security matrix: what the system key may do and neither a member's nor an admin-owned key may.
     let sealed_write = json!({"internal":"secret","grade":"A"});
@@ -187,6 +222,10 @@ async fn system_identity_is_operator_only_audited_and_no_other_key_reaches_it() 
     tokio::time::sleep(std::time::Duration::from_millis(400)).await;
     let marked: i64 = sqlx::query_scalar("SELECT count(*) FROM _brain_api_key_events WHERE system AND key_id=$1").bind(system_id.parse::<Uuid>().unwrap()).fetch_one(&pool).await.unwrap();
     assert!(marked >= 4, "every use is marked, saw {marked}");
+    let revoked_trace: Option<bool> = sqlx::query_scalar("SELECT system FROM public._brain_api_key_events WHERE key_id=$1 AND status=401 ORDER BY id DESC LIMIT 1").bind(operation_id).fetch_optional(&pool).await.unwrap();
+    assert_eq!(revoked_trace, Some(true), "refused uses keep the key's audit identity without granting system authority");
+    let expired_trace: Option<bool> = sqlx::query_scalar("SELECT system FROM public._brain_api_key_events WHERE key_id=$1 AND status=401 ORDER BY id DESC LIMIT 1").bind(expired_id).fetch_optional(&pool).await.unwrap();
+    assert_eq!(expired_trace, Some(true), "expired system keys retain their audit classification, never their authority");
     let unmarked: i64 = sqlx::query_scalar("SELECT count(*) FROM _brain_api_key_events e JOIN _brain_api_keys k ON k.id=e.key_id WHERE e.system <> k.system").fetch_one(&pool).await.unwrap();
     assert_eq!(unmarked, 0);
     let rotated = keys.rotate_operator(system_id.parse().unwrap()).await.unwrap().unwrap();

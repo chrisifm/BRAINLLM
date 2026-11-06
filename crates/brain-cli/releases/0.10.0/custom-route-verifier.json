@@ -1,0 +1,25 @@
+{
+  "id": "custom-route-verifier",
+  "kind": "capability",
+  "title": "Declared raw route verification",
+  "why": "Custom verification runs a declared bounded server handler before a raw public write, preserving exact bytes, declared headers, deadlines and fixed failures.",
+  "changelog": [
+    "Custom raw route verification runs before the application handler"
+  ],
+  "guide": "docs/backend/routes.md",
+  "apis": [
+    "verify: { scheme: 'custom' }"
+  ],
+  "affects": [
+    "server/routes/**/verify.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/routes/inbound/verify.jsbrain",
+    "snippet": "<meta server>\nexport default async function verify(ctx) { return false }"
+  },
+  "uses": [
+    {
+      "glob": "server/routes/**/verify.jsbrain"
+    }
+  ]
+}

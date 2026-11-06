@@ -1,0 +1,28 @@
+{
+  "id": "database-audit",
+  "kind": "capability",
+  "title": "Bounded current-database audit",
+  "why": "The selected current database and role can be inspected read-only with bounded statements and proposals, without applying SQL, printing query values or changing cluster settings.",
+  "changelog": [
+    "Read-only Postgres audit and anonymous HTTP conformity observations"
+  ],
+  "guide": "docs/backend/database-audit.md",
+  "apis": [
+    "brain db audit",
+    "brain backend conform"
+  ],
+  "affects": [
+    "package.json"
+  ],
+  "adopt": {
+    "file": "package.json",
+    "snippet": "{\"scripts\":{\"db:audit\":\"brain db audit --env development --json\"}}",
+    "command": "brain db audit --env development --json"
+  },
+  "uses": [
+    {
+      "glob": "package.json",
+      "contains": "brain db audit"
+    }
+  ]
+}

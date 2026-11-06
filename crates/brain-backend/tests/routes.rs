@@ -101,6 +101,7 @@ async fn declared_routes_verify_signatures_type_input_and_shape_responses() {
     let (http, _) = brain_backend::http::router_with_platform(
         pool.clone(),
         brain_backend::Config {
+        vitals: None,
         api_keys: None,
             roles: Default::default(),
             mail: None,
@@ -114,7 +115,7 @@ async fn declared_routes_verify_signatures_type_input_and_shape_responses() {
             origins: vec![ORIGIN.into()],
             production: true,
             jwt: None,
-            google: None, apple: None, linkedin: None,
+            google: None, apple: None, apple_native: None, linkedin: None,
             gcs: None,
         },
         Platform { routes: routes(), handlers: Some(Arc::new(Echo)), disabled_webhooks: vec!["orders".into()], ..Default::default() },
@@ -215,6 +216,7 @@ async fn routes_without_compiled_handlers_fail_before_serving() {
     let pool = brain_backend::db::connect(&url).await.unwrap();
     brain_backend::db::migrate(&pool, &[]).await.unwrap();
     let config = || brain_backend::Config {
+        vitals: None,
         api_keys: None,
         roles: Default::default(),
         mail: None,
@@ -228,7 +230,7 @@ async fn routes_without_compiled_handlers_fail_before_serving() {
         origins: vec![ORIGIN.into()],
         production: true,
         jwt: None,
-        google: None, apple: None, linkedin: None,
+        google: None, apple: None, apple_native: None, linkedin: None,
         gcs: None,
     };
     let err = brain_backend::http::router_with_platform(pool.clone(), config(), Platform { routes: routes(), handlers: None, ..Default::default() })
@@ -236,6 +238,9 @@ async fn routes_without_compiled_handlers_fail_before_serving() {
         .err()
         .unwrap();
     assert!(err.contains("handler.jsbrain"), "{err}");
+    let custom=Route::from_contract("payment_events",&json!({"method":"POST","path":"/events/custom","auth":"public","body":"raw","verify":{"scheme":"custom"}}),&|_|None).unwrap();
+    let err=brain_backend::http::router_with_platform(pool.clone(),config(),Platform {routes:vec![custom],handlers:Some(Arc::new(Echo)),..Default::default()}).await.err().unwrap();
+    assert!(err.contains("verify.jsbrain"),"a legacy handler inventory cannot implicitly authorize custom verification: {err}");
 }
 
 #[test]

@@ -1,0 +1,26 @@
+{
+  "id": "system-only-grants",
+  "kind": "capability",
+  "title": "Explicit operator-only operation grants",
+  "why": "Actions, transitions and operations can require a verified operator-issued system key independently of roles. Roles named system, owner or admin do not acquire that authority and nested steps cannot broaden it.",
+  "changelog": [
+    "Explicit systemOnly grants protect actions, transitions and operations"
+  ],
+  "guide": "docs/backend/transactions.md",
+  "apis": [
+    "systemOnly"
+  ],
+  "affects": [
+    "server/**/*.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/operations/update_label.jsbrain",
+    "snippet": "<meta server>\nexport default { systemOnly: true, input: { id: 'str!', label: 'str!' }, steps: [{ as: 'product', update: 'products', id: '$input.id', data: { label: '$input.label' } }], result: ['product'] }"
+  },
+  "uses": [
+    {
+      "glob": "server/**/*.jsbrain",
+      "contains": "systemOnly:"
+    }
+  ]
+}

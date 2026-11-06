@@ -36,6 +36,7 @@ async fn json_body(response: Response<Body>) -> Value {
 }
 fn config(resources: Vec<Resource>) -> brain_backend::Config {
     brain_backend::Config {
+        vitals: None,
         api_keys: None,
         roles: Default::default(),
         mail: None,
@@ -49,7 +50,7 @@ fn config(resources: Vec<Resource>) -> brain_backend::Config {
         origins: vec![ORIGIN.into()],
         production: true,
         jwt: None,
-        google: None, apple: None, linkedin: None,
+        google: None, apple: None, apple_native: None, linkedin: None,
         gcs: None,
     }
 }

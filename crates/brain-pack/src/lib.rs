@@ -11,6 +11,10 @@ mod brotli;
 mod build_cache;
 mod asset_layout;
 mod feedback;
+mod sentry;
+mod native_vitals;
+pub use native_vitals::NativeVitalsOptions;
+mod error_fallback;
 pub use feedback::Optimization;
 pub use build_cache::Stats as BuildCacheStats;
 pub mod ledger;
@@ -23,6 +27,7 @@ pub mod classes;
 pub mod cssdedup;
 mod css_values;
 pub mod server;
+pub mod server_warmup;
 mod server_runtime;
 pub mod cache_budget;
 mod runtime_shake;
@@ -201,6 +206,7 @@ pub fn read_server_limits(root: &Path) -> Result<ServerLimits, String> {
         return Err("brain.json `server` must be an object; fix: write \"server\": { \"maxBodyKB\": 1024, \"timeoutMs\": 10000, \"rpcPerMinute\": 60 }".into());
     };
     for (key, value) in entries {
+        if key == "warmup" { server_warmup::parse(value)?; continue; }
         if key == "earlyHints" {
             let brain_mcp::Json::Bool(on) = value else {
                 return Err("brain.json `server.earlyHints` must be true or false; fix: leave it out unless every proxy in front of the server handles 103 (nginx 1.29 or later)".into());
@@ -951,11 +957,35 @@ fn build_inner_with_options(
     measure: bool,
     options: &BuildOptions,
 ) -> Result<Output, String> {
+    let data_warmup = server_warmup::read(&input.root)?;
+    if options.static_export && data_warmup.is_some() { return Err("Startup data warmup requires automatic SSR output; fix: remove server.warmup for static output".into()); }
     if options.static_export && (options.native_sockets.is_some() || !options.native_routes.is_empty() || !options.trust_proxy.is_empty() || options.access.is_some()) {
         return Err("static output cannot enforce native sockets, routes, trustProxy or access policies; fix: remove the server feature or use automatic output mode".into());
     }
     if options.static_export && input.shim.is_none() {
         return Err("static output requires the prerender DOM shim; fix: supply the embedded build runtime".into());
+    }
+    let native_vitals = native_vitals::read(&input.root)?;
+    if native_vitals != options.native_vitals { return Err("Native vitals requires a configured fixed native backend in the selected environment; fix: configure BRAIN_BACKEND_URL before building or disable vitals".into()); }
+    if native_vitals.is_some() && options.static_export { return Err("Native vitals requires existing Node/SSR output and cannot be used with static output; fix: disable vitals or use custom reportVitals(url) with an external collector".into()); }
+    let sentry_enabled = sentry::enabled(&input.root)?;
+    if sentry_enabled && options.static_export { return Err("Sentry requires the Node server and cannot be used with static output; fix: remove sentry or select automatic output with an SSR route".into()); }
+    let route_table=routes::discover(&input.root);
+    let route_params=routes::constraints(&input.root,&route_table)?;
+    // Restricted redirects need the same raw-URI evaluator as SSR, even in an otherwise static app.
+    let constrained_redirects=match std::fs::read_to_string(input.root.join("redirects.json")) {
+        Ok(src)=>match brain_lex::Json::parse(&src).map_err(|e|format!("redirects.json: {e}"))? {
+            brain_lex::Json::Arr(items)=>items.iter().any(|rule|rule.get("params").is_some_and(|p|!matches!(p,brain_lex::Json::Obj(kv) if kv.is_empty()))),
+            _=>return Err("redirects.json must be an array; fix: wrap the redirect rules in an array".into()),
+        },
+        Err(e) if e.kind()==std::io::ErrorKind::NotFound=>false,
+        Err(_)=>return Err("redirects.json cannot be read; fix: check the app file permissions".into()),
+    };
+    if constrained_redirects && options.static_export {
+        return Err("static output cannot represent constrained redirects in _redirects; fix: use automatic output with the server runtime or replace these rules with explicit literal redirects".into());
+    }
+    if constrained_redirects && input.server_mjs.is_none() {
+        return Err("constrained redirects require the embedded server runtime; fix: build with the BRAINLLM runtime or use literal redirect rules".into());
     }
     cache::validate_public(&input.root)?;
     let asset_layout = asset_layout::AssetLayout::load(&input.root, options.static_export || measure)?;
@@ -964,6 +994,12 @@ fn build_inner_with_options(
     // brain.json `base` (#148): every URL the build writes starts with `pre` (`/app`, or empty at the root); dist/
     // file paths never do
     let base = read_base(&input.root);
+    if sentry_enabled || native_vitals.is_some() {
+        let prefix = base.trim_end_matches('/');
+        if prefix.len() > 256 || !prefix.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"/_-.".contains(&byte)) || prefix.split('/').skip(1).any(|part| part.is_empty() || matches!(part, "." | "..")) {
+            return Err("Optional browser collectors require a literal ASCII base prefix of at most 256 bytes without traversal; fix: choose /app/ or disable sentry/vitals instead of shipping an inactive collector".into());
+        }
+    }
     if asset_layout.github_pages {
         let site=input.site.as_deref().ok_or("GitHub Pages requires its public origin; fix: set PUBLIC_SITE_URL or build with --site https://example.github.io and set brain.json base separately")?;
         let site=url::Url::parse(site).map_err(|_|"GitHub Pages requires a valid absolute HTTPS origin")?;
@@ -1030,6 +1066,14 @@ fn build_inner_with_options(
     let has_server_runtime = input.server_mjs.is_some() && input.shim.is_some();
     // 1. Load the graph (DFS from every view and its layouts, plus the error pages server routes may render).
     let mut stack: Vec<Node> = Vec::new();
+    if native_vitals.is_some() {
+        if !input.runtime_siblings.iter().any(|(name,_)| name == "brain-native-vitals.js") { return Err("Native vitals runtime is not embedded; rebuild the compiler".into()); }
+        stack.push(Node::Runtime("brain-native-vitals.js".into()));
+    }
+    if sentry_enabled {
+        if !input.runtime_siblings.iter().any(|(name,_)| name == "brain-sentry.js") { return Err("Sentry runtime is not embedded; rebuild the compiler".into()); }
+        stack.push(Node::Runtime("brain-sentry.js".into()));
+    }
     // the client router is a graph module (it imports the core: its import must point at the hashed core, QA #172)
     if input.runtime_siblings.iter().any(|(n, _)| n == "brain-router.js") {
         stack.push(Node::Runtime("brain-router.js".into()));
@@ -1250,6 +1294,7 @@ fn build_inner_with_options(
     //    each import can point to its dependency's final hashed URL.
     let core_node = Node::Runtime("brain.js".into());
     let mut min_src: HashMap<Node, String> = HashMap::new();
+    let mut sentry_maps: HashMap<Node, sentry::Mapping> = HashMap::new();
     for (i, (n, m)) in modules.iter().enumerate() {
         report("minify", i + 1, modules.len());
         let src = if input.minify && matches!(n,Node::File(file) if dependencies::is_foreign(file)) {
@@ -1275,6 +1320,12 @@ fn build_inner_with_options(
                 }
             } else { m.js.clone() };
             format!("{}{}",dependencies::notices(&m.js)?,dependencies::compact(&source)?)
+        } else if sentry_enabled && *n != core_node {
+            // Private maps cover generated browser JS token anchors, never original .brain contents.
+            let (result, positions) = sentry::minify(&m.js,input.minify)?;
+            sentry_maps.insert(n.clone(), sentry::Mapping { input: m.js.clone(), positions });
+            optimizations.push(Optimization {source:match n {Node::File(f)|Node::Worker(f)=>f.clone(),Node::Runtime(f)=>format!("runtime/{f}")},original_source_hash:source_hashes.get(n).cloned(),stage:"module-minify",detail:result.report.to_json()});
+            result.code
         } else if input.minify && *n != core_node {
             let (code, detail) = feedback::minify(&input.root, &m.js).map_err(|e|format!("{}: production module optimization failed: {e}", match n {Node::File(f)|Node::Worker(f)=>f.as_str(),Node::Runtime(f)=>f.as_str()}))?;
             optimizations.push(Optimization {source:match n {Node::File(f)|Node::Worker(f)=>f.clone(),Node::Runtime(f)=>format!("runtime/{f}")},original_source_hash:source_hashes.get(n).cloned(),stage:"module-minify",detail});
@@ -1285,7 +1336,20 @@ fn build_inner_with_options(
         min_src.insert(n.clone(), src);
     }
     if input.minify && modules.contains_key(&core_node) {
-        runtime_shake::apply(&mut min_src, &server_runtime.exports, &mut optimizations)?;
+        let before: HashMap<Node,String> = sentry_maps.keys().filter(|node| matches!(node,Node::Runtime(_))).map(|node|(node.clone(),min_src[node].clone())).collect();
+        let mut roots = server_runtime.exports.clone();
+        if native_vitals.is_some() { roots.entry("brain-native-vitals.js".into()).or_default().insert("startNativeVitals".into()); }
+        if sentry_enabled { roots.entry("brain-sentry.js".into()).or_default().insert("startSentry".into()); }
+        runtime_shake::apply(&mut min_src, &roots, &mut optimizations)?;
+        // Runtime export pruning changes coordinates after module minification. Its final generated JS is
+        // the truthful source space for those modules; app modules retain the richer pre-minification map.
+        for (node, original) in before {
+            if original != min_src[&node] {
+                let source = &min_src[&node];
+                let positions = brain_min::lex::lex(source)?.into_iter().map(|token|(token.start,token.start)).collect();
+                sentry_maps.insert(node,sentry::Mapping{input:source.clone(),positions});
+            }
+        }
     }
     // public/ assets named in JS (`"/og.png"`) point at their immutable copy, before the chunk is hashed, so the
     // chunk's name changes with the asset (QA #124). Same URLs as cache.rs (`hashed_url`).
@@ -1308,6 +1372,21 @@ fn build_inner_with_options(
             }
         }
     }
+    if sentry_enabled {
+        let public: BTreeMap<String,String> = public_urls.iter().map(|(key,value)|(key.clone(),format!("{pre}{value}"))).collect();
+        for (node, mapping) in &mut sentry_maps {
+            if !matches!(node, Node::File(file) if !dependencies::is_foreign(file)) { continue; }
+            let mut source = mapping.input.clone();
+            if input.cache.http && !public.is_empty() { source = cache::rewrite(&source, &public); }
+            if !pre.is_empty() { source = prefix_links(&source, &pre); }
+            if source != mapping.input {
+                let (result, positions) = sentry::minify(&source,input.minify)?;
+                mapping.input = source; mapping.positions = positions; min_src.insert(node.clone(), result.code);
+            }
+        }
+    }
+    // Empty pruned modules cannot produce an error location and need no invented mapping.
+    sentry_maps.retain(|_,mapping| !mapping.positions.is_empty());
     // Preserve reachable SDK layout for import.meta.url and dynamic filename defaults, inside a versioned namespace.
     let mut foreign_snapshot=dependency_resolver.summary().stringify();
     let mut foreign_code:BTreeMap<&String,&String>=BTreeMap::new();
@@ -1324,6 +1403,7 @@ fn build_inner_with_options(
     }
     let mut url_of: HashMap<Node, String> = HashMap::new();
     let mut files = BTreeMap::new();
+    let mut sentry_artifacts = Vec::new();
     fn emit(
         n: &Node,
         modules: &HashMap<Node, Module>,
@@ -1336,6 +1416,8 @@ fn build_inner_with_options(
         foreign_namespace: &str,
         asset_layout: &asset_layout::AssetLayout,
         asset_urls: &BTreeMap<String,String>,
+        sentry_maps: &HashMap<Node, sentry::Mapping>,
+        sentry_artifacts: &mut Vec<sentry::Artifact>,
     ) -> Result<String, String> {
         if let Some(u) = url_of.get(n) {
             return Ok(u.clone());
@@ -1347,16 +1429,24 @@ fn build_inner_with_options(
         let src = &min_src[n];
         let mut js = String::with_capacity(src.len());
         let mut last = 0;
+        let mut mapping = sentry_maps.get(n).cloned();
+        let mut offset: isize = 0;
         for (a, b, spec) in module_refs(src)? {
-            let u=if let Some((_,d))=m.deps.iter().find(|(s,_)|*s==spec) {emit(d,modules,min_src,url_of,visiting,files,pre,jsx,foreign_namespace,asset_layout,asset_urls)?}else if let Some((_,file))=m.assets.iter().find(|(s,_)|*s==spec){asset_urls.get(file).cloned().ok_or("URL asset was not emitted")?}else{continue};
+            let u=if let Some((_,d))=m.deps.iter().find(|(s,_)|*s==spec) {emit(d,modules,min_src,url_of,visiting,files,pre,jsx,foreign_namespace,asset_layout,asset_urls,sentry_maps,sentry_artifacts)?}else if let Some((_,file))=m.assets.iter().find(|(s,_)|*s==spec){asset_urls.get(file).cloned().ok_or("URL asset was not emitted")?}else{continue};
             js.push_str(&src[last..a]);
-            js.push_str(&format!("\"{u}\""));
+            let replacement = format!("\"{u}\"");
+            if let Some(mapping) = &mut mapping { mapping.replace((a as isize + offset) as usize, (b as isize + offset) as usize, replacement.len()); }
+            offset += replacement.len() as isize - (b-a) as isize;
+            js.push_str(&replacement);
             last = b;
         }
         js.push_str(&src[last..]);
-        if !matches!(n,Node::File(file) if dependencies::is_foreign(file)) { js=brain_lex::branding::code_with(&js,asset_layout.compiler_branding); }
+        if !matches!(n,Node::File(file) if dependencies::is_foreign(file)) { js=brain_lex::branding::code_with(&js,asset_layout.compiler_branding_assets); }
+        let mut artifact = mapping.as_ref().map(|mapping| sentry::artifact(&mut js,mapping)).transpose()?;
         let key=match n {Node::File(file) if dependencies::is_foreign(file)=>format!("{foreign_namespace}/{file}"),_=>asset_layout.js(&format!("{}.{jsx}",content_hash(&js)))};
         let url = format!("{pre}/{key}");
+        if let Some(artifact) = &mut artifact { artifact.asset = url.clone(); }
+        if let Some(artifact) = artifact { sentry_artifacts.push(artifact); }
         files.insert(key, js);
         visiting.remove(n);
         url_of.insert(n.clone(), url.clone());
@@ -1366,7 +1456,7 @@ fn build_inner_with_options(
     let mut nodes: Vec<Node> = modules.keys().cloned().collect();
     nodes.sort();
     for n in &nodes {
-        emit(n, &modules, &min_src, &mut url_of, &mut visiting, &mut files, &pre, ext.js(),&foreign_namespace,&asset_layout,&asset_urls)?;
+        emit(n, &modules, &min_src, &mut url_of, &mut visiting, &mut files, &pre, ext.js(),&foreign_namespace,&asset_layout,&asset_urls,&sentry_maps,&mut sentry_artifacts)?;
     }
 
     // 3. Shared tokens CSS + one CSS file per view (styles of every module it reaches statically).
@@ -1375,7 +1465,7 @@ fn build_inner_with_options(
     let tokens_head = if tokens.trim().is_empty() {
         String::new()
     } else {
-        let css = brain_lex::branding::code_with(&minify_css(&format!("@layer tokens{{{tokens}}}")),asset_layout.compiler_branding);
+        let css = brain_lex::branding::code_with(&minify_css(&format!("@layer tokens{{{tokens}}}")),asset_layout.compiler_branding_assets);
         if asset_layout.inline_css && css.len() <= INLINE_TOKENS_CSS {
             format!("<style>{css}</style>")
         } else {
@@ -1494,7 +1584,12 @@ fn build_inner_with_options(
             Some(Ok(list)) => {
                 for params in list {
                     match concrete_route(route, params) {
-                        Some(r) => pages_of.push((r, view.clone(), params_json(params), needs_server.contains(view), false)),
+                        Some(r) => {
+                            if let Some(constraints)=route_params.get(route) {
+                                if routes::matches_with(route,&r,constraints).is_none() {return Err(format!("{view}: paths() violates routeParams for `{route}`; fix: return only parameters satisfying its declared patterns"));}
+                            }
+                            pages_of.push((r, view.clone(), params_json(params), needs_server.contains(view), false));
+                        },
                         None if options.static_export || params.iter().any(|(_, v)| v.split('/').any(|s| s == "." || s == "..")) => return Err(format!("{view}: paths() returned {params:?}, which does not fill every param of `{route}` safely; fix: supply every route parameter using nonempty segments other than . or ..")),
                         None => warnings.push(format!("{view}: paths() returned {params:?}, which does not fill every param of `{route}`")),
                     }
@@ -1648,7 +1743,7 @@ fn build_inner_with_options(
         // are immutable assets: their compression/cache does not include personalized HTML or props.
         let mut view_css = String::new();
         if !css.trim().is_empty() {
-            let css = brain_lex::branding::code_with(&minify_css(&css),asset_layout.compiler_branding);
+            let css = brain_lex::branding::code_with(&minify_css(&css),asset_layout.compiler_branding_assets);
             if asset_layout.inline_css && !*ssr && css.len() <= INLINE_CSS {
                 view_css = format!("<style>{css}</style>");
             } else {
@@ -1710,7 +1805,7 @@ fn build_inner_with_options(
             }
             if !keys.is_empty() || !entries.is_empty() {
                 let js = format!("import{{add}}from\"{rt}\";add({},{{{}}});\n", prerender_json(loc), entries.join(","));
-                let js = brain_lex::branding::code_with(&js,asset_layout.compiler_branding);
+                let js = brain_lex::branding::code_with(&js,asset_layout.compiler_branding_assets);
                 let key = asset_layout.js(&format!("i18n-{}-{loc}.{}.{}", view_slug(view), content_hash(&js), ext.js()));
                 dict_url = Some(format!("{pre}/{key}"));
                 dicts.insert(route.clone(), format!("{pre}/{key}"));
@@ -1751,8 +1846,23 @@ fn build_inner_with_options(
                 } else {
                     let entries: Vec<_> = with_loading.iter().map(|(route,url)|((*route).clone(),url.clone())).collect();
                     // one loading view for every route (views/_loading.brain alone): one pattern instead of one per route
-                    let every = with_loading.len() == views.iter().filter(|(r, _)| r != "*").count() && with_loading.windows(2).all(|w| w[0].1 == w[1].1);
-                    let table = if every { format!("{{rx:\"^/\",view:{}}}", prerender_json(&with_loading[0].1)) } else { navigation::loading(&entries) };
+                    let every = route_params.is_empty() && with_loading.len() == views.iter().filter(|(r, _)| r != "*").count() && with_loading.windows(2).all(|w| w[0].1 == w[1].1);
+                    let table = if every { format!("{{rx:\"^/\",view:{}}}", prerender_json(&with_loading[0].1)) } else if route_params.is_empty() { navigation::loading(&entries) } else {
+                        let translations: Vec<_>=i18n.as_ref().map(|(default,locales)|locales.iter().filter(|locale|*locale!=default).map(|locale|(locale,LocaleLinks::of(&input.root,locale,true))).collect()).unwrap_or_default();
+                        let mut rows=Vec::new();
+                        for (route,url) in &entries {
+                            rows.push((route.clone(),route.clone(),url.clone()));
+                            for (locale,links) in &translations {
+                                let path=links.slugs.get(route).map_or_else(||route.clone(),Clone::clone);
+                                rows.push((if path=="/" {format!("/{locale}")}else{format!("/{locale}{path}")},route.clone(),url.clone()));
+                            }
+                        }
+                        rows.sort_by(|a,b|routes::order(&a.0,&b.0));
+                        rows.iter().map(|(path,original,url)| {
+                            let rx=route_params.get(original).map_or_else(||routes::regex_source(path),|p|routes::regex_source_with(path,p));
+                            format!("{{rx:{},view:{}}}",prerender_json(&rx),prerender_json(url))
+                        }).collect::<Vec<_>>().join(",")
+                    };
                     format!(",core:{},loading:[{table}]", prerender_json(&core))
                 };
                 // #283: `guards` = folder route → chunk of its `_guard.jsbrain` (RUNTIME runs them outermost first)
@@ -1992,7 +2102,7 @@ fn build_inner_with_options(
         // a page outside the default language keeps it in the links its views mount (§37)
         if let (Some(t), Some(l), Some(rt), true) = (&links, &p.locale, url_of.get(&Node::Runtime("brain-links.js".into())), p.interactive && script.starts_with("<script type=\"module\">")) {
             let js = format!("import l from\"{rt}\";l({},{},{},{},{});\n", prerender_json(l), prerender_json(&pre), prerender_json(&t.prefix), prerender_json(&t.pattern()), t.slugs_json());
-            let js = brain_lex::branding::code_with(&js,asset_layout.compiler_branding);
+            let js = brain_lex::branding::code_with(&js,asset_layout.compiler_branding_assets);
             let key = asset_layout.js(&format!("links-{l}.{}.{}", content_hash(&js), ext.js()));
             // after the dictionary: the page's first import stays the one its first render needs
             script = match &p.dict {
@@ -2049,7 +2159,7 @@ fn build_inner_with_options(
     // the one route table (#187): manifest routes in match order, each with the regex server.mjs uses
     ssr_pages.sort_by(|a, b| routes::order(&a.0.route, &b.0.route));
     let rpc_files: Vec<&String> = server_src.iter().filter(|(_, (_, _, f))| !f.is_empty()).map(|(r, _)| r).collect();
-    if !ssr_pages.is_empty() || !rpc_files.is_empty() {
+    if !ssr_pages.is_empty() || !rpc_files.is_empty() || constrained_redirects {
         match &input.server_mjs {
             None => {
                 if !rpc_files.is_empty() && !measure {
@@ -2116,7 +2226,7 @@ fn build_inner_with_options(
                     routes_json.push(format!(
                         "{{\"path\":{},\"rx\":{},\"view\":{},\"layouts\":[{}],\"server\":{},\"page\":{}{}{chain}}}",
                         prerender_json(&p.route),
-                        prerender_json(&routes::regex_source(&p.route)),
+                        prerender_json(&routes::route_of(view).and_then(|r|route_params.get(&r)).map_or_else(||routes::regex_source(&p.route),|params|routes::regex_source_with(&p.route,params))),
                         prerender_json(&url_of[&Node::File((*view).clone())]),
                         layouts.join(","),
                         srv.map_or("null".to_string(), |s| prerender_json(&s)),
@@ -2147,7 +2257,12 @@ fn build_inner_with_options(
                         template_of("!forbidden").map_or(String::new(), |t| format!(",\"forbidden\":{t}"))
                     ),
                 );
-                files.insert("server.mjs".into(), server_mjs.replace("from './native-sockets.mjs'", "from './_server/native-sockets.mjs'").replace("from './llm.mjs'", "from './_server/llm.mjs'"));
+                files.insert("server.mjs".into(), server_mjs.replace("from './native-sockets.mjs'", "from './_server/native-sockets.mjs'").replace("from './llm.mjs'", "from './_server/llm.mjs'").replace("from './redis-cache.mjs'", "from './_server/redis-cache.mjs'").replace("import('./warmup.mjs')", "import('./_server/warmup.mjs')"));
+                if data_warmup.is_some() {
+                    files.insert("_server/warmup.mjs".into(), include_str!("../../../runtime/server/warmup.mjs").into());
+                    files.insert("_server/warmup-watchdog.mjs".into(), include_str!("../../../runtime/server/warmup-watchdog.mjs").into());
+                }
+                files.insert("_server/redis-cache.mjs".into(), include_str!("../../../runtime/server/redis-cache.mjs").into());
                 files.insert("_server/llm.mjs".into(), include_str!("../../../runtime/server/llm.mjs").into());
                 files.insert("_server/native-sockets.mjs".into(), include_str!("../../../runtime/server/native-sockets.mjs").into());
                 if let Some(shim) = &input.shim {
@@ -2221,6 +2336,9 @@ fn build_inner_with_options(
             assets.push((url.trim_start_matches('/').into(), size));
         }
         let mut out = post(&mut pages, &assets)?;
+        if options.static_export && out.files.iter().any(|(p,_)|p=="_brain/redirect-capabilities.json") {
+            return Err("static output cannot represent constrained redirects in _redirects; fix: use automatic output with the server runtime or replace these rules with explicit literal redirects".into());
+        }
         if asset_layout.custom() {
             let mut urls = BTreeMap::new();
             for (path, _) in &out.files {
@@ -2265,6 +2383,32 @@ fn build_inner_with_options(
             *manifest = manifest.replacen("{\"v\":1,", &format!("{{\"v\":1,\"site\":{},", prerender_json(site)), 1);
         }
     }
+    if let Some(config) = &native_vitals {
+        if !files.contains_key("server.mjs") { return Err("Native vitals requires existing Node/SSR output; fix: add an SSR route or disable vitals for static hosting".into()); }
+        let url = url_of.get(&Node::Runtime("brain-native-vitals.js".into())).ok_or("Native vitals browser module was not emitted")?;
+        let routes = config.routes.iter().map(|route| prerender_json(route)).collect::<Vec<_>>().join(",");
+        let bootstrap = format!("<link rel=\"modulepreload\" href=\"{url}\"><script type=\"module\">import{{startNativeVitals}}from {};startNativeVitals({{base:{},routes:[{routes}]}})</script>",prerender_json(url),prerender_json(&pre));
+        for page in &mut pages {
+            page.html = page.html.replace("<meta name=\"brain-zero-js\" content=\"1\">", "").replace("</head>", &format!("{bootstrap}</head>"));
+            files.insert(page.file.clone(),page.html.clone());
+        }
+    }
+    if sentry_enabled {
+        if !files.contains_key("server.mjs") { return Err("Sentry v1 requires existing Node/SSR output; fix: add an SSR route or remove sentry for static hosting".into()); }
+        sentry::validate_catalog(&sentry_artifacts)?;
+        let catalog = sentry::catalog(&sentry_artifacts);
+        let browser_catalog = sentry::browser_catalog(&sentry_artifacts);
+        let url = url_of.get(&Node::Runtime("brain-sentry.js".into())).ok_or("Sentry browser module was not emitted")?;
+        let bootstrap = format!("<link rel=\"modulepreload\" href=\"{url}\"><script type=\"module\">import{{startSentry}}from {};startSentry({{base:{},assets:{browser_catalog}}})</script>",prerender_json(url),prerender_json(&pre));
+        for page in &mut pages {
+            page.html = page.html.replace("<meta name=\"brain-zero-js\" content=\"1\">", "").replace("</head>", &format!("{bootstrap}</head>"));
+            files.insert(page.file.clone(),page.html.clone());
+        }
+        let manifest = files.get_mut("_server/manifest.json").ok_or("Sentry requires the Node server manifest")?;
+        *manifest = manifest.replacen("{\"v\":1,", &format!("{{\"v\":1,\"sentry\":{{\"assets\":{catalog}}},"),1);
+        files.insert("_server/sentry.mjs".into(),include_str!("../../../runtime/server/sentry.mjs").into());
+        if let Some(server) = files.get_mut("server.mjs") { *server = server.replace("import('./sentry.mjs')","import('./_server/sentry.mjs')"); }
+    }
     if let Some(socket) = &options.native_sockets {
         post_csp.extend(cache::native_socket_csp(socket));
         // Install the opt-in BEFORE cache::apply hashes shipped source/configuration.
@@ -2304,7 +2448,7 @@ fn build_inner_with_options(
         if !asset_layout.compiler_branding {
             // Specialize only the owned runtime source; other generators already omit their own attribution.
             if path=="server.mjs" {
-                *source=source.lines().filter(|line|!line.trim_start().starts_with("'x-generated-by':") && !line.starts_with("// BRAINLLM production server")).collect::<Vec<_>>().join("\n").replace(brain_lex::branding::HTML,"");
+                *source=source.lines().filter(|line|!line.trim_start().starts_with("'x-generated-by':") && !line.starts_with("// BRAINLLM production server")).collect::<Vec<_>>().join("\n").replace(brain_lex::branding::HTML,"").replace(brain_lex::branding::CODE,"");
             }
             continue;
         }
@@ -2347,10 +2491,26 @@ fn build_inner_with_options(
     }
     let mut public_bin: BTreeMap<String, Vec<u8>> = post_bin;
     public_bin.extend(emitted_assets);
+    // URL parsing normalizes dot segments; raw constrained routes must refuse such aliases before parsing.
+    // This is explicit opt-in metadata and participates in the build signature; legacy apps retain their dispatch.
+    if constrained_redirects || route_params.values().any(|params| !params.is_empty()) {
+        if let Some(manifest) = files.get_mut("_server/manifest.json") {
+            *manifest = manifest.replacen("{\"v\":1,", "{\"v\":1,\"rawRouting\":true,", 1);
+        }
+    }
+    // Generic error messages are public output content and must participate in the build signature.
+    if let Some(manifest) = files.get_mut("_server/manifest.json") {
+        *manifest = manifest.replacen("{\"v\":1,", &format!("{{\"v\":1,\"errorFallback\":{},", error_fallback::metadata(&input.root)), 1);
+    }
     // measuring skips it: the signature changes on every edit and would show as noise in every page's bytes
     let applied = if measure { cache::Applied { warnings: vec![], build_hash: String::new() } } else { cache::apply_with_layout(&input.root, &cache::CacheCfg { base: base.clone(), ext: (if ext == Ext::Brain { "brain" } else { "web" }).into(), ..input.cache.clone() }, &refs, &post_csp, &mut files, &mut public_bin, &asset_layout, &immutable) };
+    if files.contains_key("_brain/redirect-capabilities.json") {
+        for path in ["_redirects","_brain/nginx.conf","_brain/Caddyfile","_brain/redirects.nginx","_brain/redirects.caddy"] {files.remove(path);}
+    }
+
     warnings.extend(applied.warnings);
     let signature = applied.build_hash.clone();
+    if sentry_enabled && !measure { sentry::write_private(&input.root,&signature,&sentry_artifacts)?; }
     // server.mjs answers /_health and X-Brain-Build with it (written after the signature: see cache::apply)
     if let Some(mut m) = files.remove("_server/manifest.json") {
         // `csp`: the site policy without inline hashes; server.mjs adds its per-response nonce to script-src (RUNTIME)
@@ -2359,7 +2519,12 @@ fn build_inner_with_options(
         m = m.replacen("{\"v\":1,", &format!("{{\"v\":1,\"compilerBranding\":{},\"build\":\"{signature}\",\"base\":{},\"csp\":{policy},",asset_layout.compiler_branding, prerender_json(&base)), 1);
         // `server` (§11.1): brain.json body/time/rate limits; an invalid value keeps the defaults (brain check: B0707)
         let limits = read_server_limits(&input.root).unwrap_or_else(|e| { warnings.push(e); ServerLimits::default() });
-        m = m.replacen("{\"v\":1,", &format!("{{\"v\":1,\"server\":{},", limits.to_json()), 1);
+        let mut server_settings = limits.to_json();
+        if let Some(warmup) = &data_warmup {
+            server_settings.pop();
+            server_settings.push_str(&format!(",\"warmup\":{}}}",warmup.to_json()));
+        }
+        m = m.replacen("{\"v\":1,", &format!("{{\"v\":1,\"server\":{},", server_settings), 1);
         // redirects.json for server.mjs (#219): the table brain-seo builds (`redirects::server_json`), in the manifest
         if let Some(r) = files.remove("_server/redirects.json") {
             m = m.replacen("{\"v\":1,", &format!("{{\"v\":1,\"redirects\":{},", r.trim()), 1);
@@ -2372,8 +2537,15 @@ fn build_inner_with_options(
             let json = format!("[{}]", list.iter().map(|l| prerender_json(l)).collect::<Vec<_>>().join(","));
             m.replace_range(i..end, &json);
         }
+        if let Some(warmup) = &data_warmup {
+            let site = warmup.validate_manifest(&m, input.site.as_deref())?;
+            if brain_mcp::Json::parse(&m).ok().and_then(|m|m.get("site").and_then(brain_mcp::Json::as_str).map(str::to_owned)).is_none() {
+                m = m.replacen("{\"v\":1,", &format!("{{\"v\":1,\"site\":{},",prerender_json(&site)),1);
+            }
+        }
         files.insert("_server/manifest.json".into(), m);
     }
+    if data_warmup.is_some() && !files.contains_key("server.mjs") { return Err("Startup data warmup requires public cached SSR routes; fix: omit server.warmup from a static app".into()); }
     // a static build has no server to read it
     files.remove("_server/redirects.json");
     for p in pages.iter_mut() {

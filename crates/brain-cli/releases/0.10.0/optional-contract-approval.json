@@ -1,0 +1,20 @@
+{
+  "id": "optional-contract-approval",
+  "kind": "fix",
+  "title": "Optional contract changes explain explicit approval",
+  "why": "safe:true describes stored-row compatibility, not automatic migration permission. The drift error now explains that even optional additions require reviewed explicit approval and points at apply. No migration authority or data policy changes.",
+  "changelog": [
+    "Optional contract drift explains the explicit approval boundary"
+  ],
+  "guide": "docs/BACKEND.md",
+  "codes": [
+    "B0787"
+  ],
+  "apis": [
+    "brain backend migrate",
+    "brain backend approve-contract"
+  ],
+  "affects": [
+    "server/resources/*/schema.jsbrain"
+  ]
+}

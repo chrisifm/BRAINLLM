@@ -13,11 +13,12 @@ pub(crate) struct AssetLayout {
     pub host_files: bool,
     pub github_pages: bool,
     pub compiler_branding: bool,
+    pub compiler_branding_assets: bool,
     pub inline_css: bool,
     pub fast_compression: bool,
 }
 impl Default for AssetLayout {
-    fn default() -> Self { Self { js: "_b".into(), css: "_b".into(), images: "_b".into(), assets: "_b".into(), fonts: None, precompressed: true, host_files: true, github_pages: false, compiler_branding: true, inline_css: true, fast_compression: false } }
+    fn default() -> Self { Self { js: "_b".into(), css: "_b".into(), images: "_b".into(), assets: "_b".into(), fonts: None, precompressed: true, host_files: true, github_pages: false, compiler_branding: true, compiler_branding_assets: true, inline_css: true, fast_compression: false } }
 }
 impl AssetLayout {
     pub fn load(root: &Path, static_export: bool) -> Result<Self, String> {
@@ -33,7 +34,8 @@ impl AssetLayout {
         if source.len() > 2 * 1024 * 1024 { return Err("brain.json exceeds the output-layout read limit".into()); }
         let config = Json::parse(&source).map_err(|_| "brain.json output layout requires valid JSON")?;
         let compiler_branding=brain_lex::branding::enabled(&config)?;
-        let mut out=Self{compiler_branding,..Self::default()};
+        let compiler_branding_assets=brain_lex::branding::asset_comments(&config)?;
+        let mut out=Self{compiler_branding,compiler_branding_assets,..Self::default()};
         let Json::Obj(config) = config else { return Err("brain.json must be an object".into()); };
         let found: Vec<_> = config.iter().filter(|(name, _)| name == "staticOutput").collect();
         if found.len() > 1 { return Err("brain.json must declare staticOutput once".into()); }

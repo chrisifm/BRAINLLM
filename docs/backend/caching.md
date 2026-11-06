@@ -1,5 +1,8 @@
 # HTTP caching and conditional requests
 
+This page describes native resource HTTP caching. Optional shared caching of public Node SSR pages
+is documented separately in [REDIS-CACHE.md](../REDIS-CACHE.md).
+
 Every successful `GET /api/...` response carries an `ETag`. A client that sends it back in `If-None-Match` gets
 `304 Not Modified` with no body. Resources that anyone may read can also declare a public cache lifetime, so a CDN or
 the browser serves repeat reads without reaching the backend. Writes accept `If-Match` to refuse a lost update.

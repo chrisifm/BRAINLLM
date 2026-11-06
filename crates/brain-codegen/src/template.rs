@@ -651,7 +651,60 @@ impl Gen<'_> {
         }
     }
 
+    /// Only a per-use inline frame can prove a prop's boolean without evaluating author JavaScript.
+    fn literal_inline_bool(&self, test: &Expr) -> Option<bool> {
+        let frame = self.frames.last()?;
+        match test.unparen() {
+            Expr::Bool { value, .. } => Some(*value),
+            Expr::Ident(id) => match frame.props.get(&id.name) {
+                Some((value, false)) if value == "true" => Some(true),
+                Some((value, false)) if value == "false" => Some(false),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Removing when also removes its owner. Keep it for every expression, slot, component or handler:
+    /// even a static prop getter or provide() call can observe/mutate that owner. Native literal markup cannot.
+    fn literal_inline_body(nodes: &[Node]) -> bool {
+        nodes.iter().all(|node| match node {
+            Node::Text(_) => true,
+            Node::Element(element) => matches!(element.tag.as_str(),
+                "a" | "abbr" | "article" | "aside" | "b" | "bdi" | "bdo" | "blockquote" | "br" | "caption" | "cite" | "code" | "col" | "colgroup" | "data" | "dd" | "del" | "dfn" | "div" | "dl" | "dt" | "em" | "figcaption" | "figure" | "footer" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "header" | "hgroup" | "hr" | "i" | "ins" | "kbd" | "li" | "main" | "mark" | "nav" | "ol" | "p" | "pre" | "q" | "rp" | "rt" | "ruby" | "s" | "samp" | "section" | "small" | "span" | "strong" | "sub" | "sup" | "table" | "tbody" | "td" | "tfoot" | "th" | "thead" | "time" | "tr" | "u" | "ul" | "var" | "wbr"
+                | "svg" | "g" | "path" | "circle" | "ellipse" | "line" | "polyline" | "polygon" | "rect" | "defs" | "clipPath" | "mask" | "pattern" | "title" | "desc" | "linearGradient" | "radialGradient" | "stop"
+            ) && element.attrs.iter().all(|attribute| {
+                matches!(attribute.kind, AttrKind::Plain | AttrKind::Class | AttrKind::Style)
+                    && !attribute.name.eq_ignore_ascii_case("is")
+                    && !attribute.name.eq_ignore_ascii_case("autofocus")
+                    && !attribute.name.to_ascii_lowercase().starts_with("on")
+                    && matches!(attribute.value, AttrValue::None | AttrValue::Text(_))
+            }) && Self::literal_inline_body(&element.children),
+            _ => false,
+        })
+    }
+
     fn if_block(&mut self, branches: &[IfBranch], otherwise: Option<&[Node]>, anchor: &str, root: bool) -> String {
+        if !self.frames.is_empty() {
+            let mut selected = otherwise;
+            let mut known = true;
+            for branch in branches {
+                match self.literal_inline_bool(&branch.test) {
+                    Some(false) => (),
+                    Some(true) => { selected = Some(&branch.body); break; },
+                    None => { known = false; break; },
+                }
+            }
+            if known && selected.is_none_or(Self::literal_inline_body) {
+                return match selected {
+                    Some(nodes) if !normalize(nodes, false).is_empty() => {
+                        let fragment = self.fragment_fn(nodes, root, &[]);
+                        format!("{}(null, (() => {fragment})(), {anchor});", self.rt("insert"))
+                    },
+                    _ => String::new(),
+                };
+            }
+        }
         let when = self.rt("when");
         let first = &branches[0];
         let test = self.expr(&first.test);

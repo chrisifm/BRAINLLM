@@ -62,7 +62,7 @@ const routeCause = e => {
     if (e?.[Symbol.for('brain.backendError')] === true) cause.backend = {
       status: Number.isInteger(e.status) && e.status >= 100 && e.status <= 599 ? e.status : null,
       code: typeof e.code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(e.code) ? e.code : null,
-      fields: e.errors && typeof e.errors === 'object' ? Object.keys(e.errors).filter(k => /^[A-Za-z_$][\w$.]{0,63}$/.test(k)).slice(0, 16) : [] }
+      fields: (e.errors ?? e.fields) && typeof (e.errors ?? e.fields) === 'object' ? Object.keys(e.errors ?? e.fields).filter(k => /^[A-Za-z_$][\w$.]{0,63}$/.test(k)).slice(0, 16) : [] }
     // Source-mapped frames name `<scratch>/_server/<file>.jsbrain`; the private trace index next to the module gives
     // the app path. A name two sources share stays unnamed rather than guessed.
     for (const hit of String(e?.stack ?? '').matchAll(/(?:file:\/\/)?(\/[^\s()]{1,1024}\/_server)\/([\w.-]{1,128}\.jsbrain):(\d{1,7}):\d+/g)) {
@@ -159,7 +159,7 @@ const contextHeaders = async ctx => {
 const finishContext = ctx => { const native = nativeContexts.get(ctx); if (native) { native.res.writableEnded = true; native.res.emit('finish'); native.res.emit('close'); nativeContexts.delete(ctx) } }
 process.once('exit', () => nativeBridge?.close())
 for await (const line of createInterface({ input: process.stdin })) {
-  const { id, file, fn, ctx, args, probe, rpc, raw, key, form, rules, chain, guards, middleware, secret, contextServer, preauthenticated, nativeRequired, locale, dict, timeout, limit } = JSON.parse(line)
+  const { id, file, fn, ctx, args, probe, verification, rpc, raw, key, form, rules, chain, guards, middleware, secret, contextServer, preauthenticated, nativeRequired, locale, dict, timeout, limit } = JSON.parse(line)
   traceRid = typeof ctx?.rid === 'string' ? ctx.rid : null
   if (chain) {
     // _guard/_middleware of the route through server.mjs's runChain, with ctx.user from the signed session cookie
@@ -220,6 +220,13 @@ for await (const line of createInterface({ input: process.stdin })) {
     const m = await import(file)
     if (typeof m[fn] !== 'function') throw new Error(`${fn} is not exported by the view's server code`)
     if (probe) { out(`OK ${id} true\n`); continue }
+    if (verification) {
+      if (typeof routeExecutor !== 'function') throw new Error('Custom verification requires the private route executor')
+      // Verification receives raw bytes and declared headers, never a session, identity or backend capability.
+      const c = Object.freeze({rawBody:ctx.rawBody,rawBodyEncoding:ctx.rawBodyEncoding,headers:Object.freeze({...ctx.headers}),env:process.env})
+      out(`OK ${id} ${JSON.stringify((await m[fn](c)) === true)}\n`)
+      continue
+    }
     const S = contextServer ? await import(contextServer) : null
     // `$runAs` comes from the route contract, set by the backend after the client's request was parsed into fields.
     const { $runAs, $locale, $dict, ...plain } = S ? {} : ctx
@@ -318,7 +325,8 @@ impl Sidecar {
         Self::spawn_with(root, vars, timeout, frame_limit, production, true)
     }
     /// Like [`Sidecar::spawn_bounded`] for application routes: up to 30 s per call (outbound
-    /// requests to providers) and 1 MiB frames, with the same private process-group supervision.
+    /// requests to providers), 1 MiB response frames and bounded escaped-body request frames,
+    /// with the same private process-group supervision.
     pub fn spawn_route(
         root: &Path,
         vars: &[(String, String)],
@@ -335,7 +343,10 @@ impl Sidecar {
         {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid bounded sidecar limits"));
         }
-        Self::spawn_script(root, vars, timeout, frame_limit, production, true, &format!("{}\n{RUNNER}\n{KEY_BACKEND}\nfunction routeExecutor() {{}}", llm_script()))
+        let mut sidecar=Self::spawn_script(root, vars, timeout, frame_limit, production, true, &format!("{}\n{RUNNER}\n{KEY_BACKEND}\nfunction routeExecutor() {{}}", llm_script()))?;
+        // A raw body may need six JSON bytes per input byte. Response framing remains independently bounded.
+        sidecar.request_limit=frame_limit.saturating_mul(6).saturating_add(65536);
+        Ok(sidecar)
     }
     fn spawn_with(
         root: &Path,
@@ -476,6 +487,10 @@ impl Sidecar {
         self.timeout = self.timeout.max(std::time::Duration::from_millis(timeout_ms.saturating_add(5000)));
     }
     fn send(&mut self, request: String, deadline: std::time::Instant) -> Result<(), (u16, String)> {
+        if std::time::Instant::now()>=deadline {
+            self.terminate();
+            return Err((504,"Private invocation exhausted its deadline before dispatch".into()));
+        }
         let (ack, done) = std::sync::mpsc::sync_channel(1);
         let outcome = if request.len() > self.request_limit {
             false
@@ -719,6 +734,14 @@ impl Sidecar {
     ) -> Result<String, (u16, String)> {
         self.invoke_context(file, func, ctx_json, args_json, None, false)
     }
+    /// Route verification/handler calls share one HTTP deadline; kill the owned process even after its future drops.
+    pub fn invoke_route(&mut self,file:&str,func:&str,ctx_json:&str,deadline:std::time::Instant,verification:bool)->Result<String,(u16,String)> {
+        self.invoke_mode(file,func,ctx_json,None,None,false,deadline.min(std::time::Instant::now()+self.timeout),verification)
+    }
+    /// Includes the caller's queue/serialization time in a private invocation's absolute deadline.
+    pub fn invoke_until(&mut self,file:&str,func:&str,ctx_json:&str,args_json:Option<&str>,deadline:std::time::Instant)->Result<String,(u16,String)> {
+        self.invoke_mode(file,func,ctx_json,args_json,None,false,deadline.min(std::time::Instant::now()+self.timeout),false)
+    }
     /// Imports a private module and verifies its callable export without running the hook body.
     pub fn probe(&mut self, file: &str, func: &str) -> Result<(), (u16, String)> {
         self.invoke_context(file, func, "{}", None, None, true)
@@ -733,17 +756,26 @@ impl Sidecar {
         context: Option<(&str, &str, bool)>,
         probe: bool,
     ) -> Result<String, (u16, String)> {
+        self.invoke_mode(file,func,ctx_json,args_json,context,probe,std::time::Instant::now()+self.timeout,false)
+    }
+    fn invoke_mode(
+        &mut self,file:&str,func:&str,ctx_json:&str,args_json:Option<&str>,context:Option<(&str,&str,bool)>,probe:bool,deadline:std::time::Instant,verification:bool,
+    )->Result<String,(u16,String)> {
+        if std::time::Instant::now()>=deadline {
+            self.terminate();
+            return Err((504,"Private invocation exhausted its deadline before dispatch".into()));
+        }
         self.next += 1;
         let id = self.next;
         let args = args_json.map_or(String::new(), |a| format!(",\"args\":{a}"))
-            + if probe { ",\"probe\":true" } else { "" };
+            + if probe { ",\"probe\":true" } else { "" }
+            + if verification { ",\"verification\":true" } else { "" };
         let context=context.map(|(server,secret,verified)|format!(",\"contextServer\":{},\"secret\":{},\"preauthenticated\":{verified},\"nativeRequired\":{}",crate::json_str(server),crate::json_str(secret),self.native_required)).unwrap_or_default();
         let req = format!(
             "{{\"id\":{id},\"file\":{},\"fn\":{},\"ctx\":{ctx_json}{args}{context}}}\n",
             crate::json_str(file),
             crate::json_str(func)
         );
-        let deadline = std::time::Instant::now() + self.timeout;
         self.send(req, deadline)?;
         loop {
             let line = self.response(deadline)?;
@@ -1297,6 +1329,30 @@ mod tests {
         );
         drop(sc);
         std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn private_route_verification_has_no_ambient_capabilities_and_uses_the_remaining_deadline() {
+        let d=std::env::temp_dir().join(format!("brain-route-verifier-sidecar-{}",std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {fn drop(&mut self){let _=std::fs::remove_dir_all(&self.0);}}
+        let _cleanup=Cleanup(d.clone());
+        let f=d.join("verify.mjs");
+        std::fs::write(&f,"export default function verify(ctx) { if(ctx.rawBody==='hang') {while(true){}} if(ctx.rawBody==='invalid') return 'true'; return Object.keys(ctx).sort().join(',')==='env,headers,rawBody,rawBodyEncoding' && ctx.rawBody==='AP8=' && ctx.rawBodyEncoding==='base64' && ctx.headers['x-event-id']==='example' && !ctx.env.BRAIN_ROUTES_SYSTEM_KEY }\n").unwrap();
+        let mut sidecar=Sidecar::spawn_route(&d,&[("BRAIN_ROUTES_SYSTEM_KEY".into(),"synthetic-private-key".into())],std::time::Duration::from_secs(5),4096,true).unwrap();
+        sidecar.probe(&file_url(&f),"default").unwrap();
+        let context=r#"{"rawBody":"AP8=","rawBodyEncoding":"base64","headers":{"x-event-id":"example"},"user":{"role":"admin"},"cookies":{"private":"cookie"},"$runAs":"system","backend":true}"#;
+        assert_eq!(sidecar.invoke_route(&file_url(&f),"default",context,std::time::Instant::now()+std::time::Duration::from_secs(1),true).unwrap(),"true");
+        assert_eq!(sidecar.invoke_route(&file_url(&f),"default",r#"{"rawBody":"invalid"}"#,std::time::Instant::now()+std::time::Duration::from_secs(1),true).unwrap(),"false");
+        let escaped=format!("{{\"rawBody\":{}}}",crate::json_str(&"\0".repeat(4096)));
+        assert!(escaped.len()>sidecar.frame_limit);
+        assert_eq!(sidecar.invoke_route(&file_url(&f),"default",&escaped,std::time::Instant::now()+std::time::Duration::from_secs(1),true).unwrap(),"false","valid request escaping must not consume the independent response frame budget");
+        let begin=std::time::Instant::now();
+        assert_eq!(sidecar.invoke_route(&file_url(&f),"default",r#"{"rawBody":"hang"}"#,std::time::Instant::now()+std::time::Duration::from_millis(80),true).unwrap_err().0,504);
+        assert!(begin.elapsed()<std::time::Duration::from_secs(2));
+        assert!(sidecar.child.try_wait().unwrap().is_some(),"the actual owned Node process must be killed and reaped at the remaining deadline");
     }
 
     #[test]

@@ -164,14 +164,15 @@ async fn postgres_auth_policy_crud_transactional_hooks_and_leased_jobs() {
     };
     let http = brain_backend::http::router(
         pool.clone(),
-        brain_backend::Config { api_keys: None,
+        brain_backend::Config { vitals: None,
+        api_keys: None,
             roles: Default::default(),
             mail: None,
             auth_public_base_url: None,
             webhooks: None,before_hooks:None,sockets:None,
             gcs: None,
             jwt: None,
-            google: None, apple: None, linkedin: None,
+            google: None, apple: None, apple_native: None, linkedin: None,
             resources: vec![exposed],
             jobs: vec![Resource {
                 name: "article_created".into(),

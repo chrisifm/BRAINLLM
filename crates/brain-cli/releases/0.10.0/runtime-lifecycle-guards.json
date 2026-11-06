@@ -1,0 +1,18 @@
+{
+  "id": "runtime-lifecycle-guards",
+  "kind": "fix",
+  "title": "Lazy visibility and same-origin vitals guards",
+  "why": "A lazy visible import can resume correctly after hidden-document transitions and removes all owned listeners on completion/disposal. Custom vitals endpoints are pinned to the actual same origin even with a foreign base element.",
+  "changelog": [
+    "Lazy visibility recovery and custom vitals same-origin handling are hardened"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "apis": [
+    "lazy",
+    "reportVitals"
+  ],
+  "affects": [
+    "views/**",
+    "comp/**"
+  ]
+}

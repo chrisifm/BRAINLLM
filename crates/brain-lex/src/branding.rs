@@ -16,6 +16,19 @@ pub fn enabled(config:&crate::Json)->Result<bool,String> {
         _=>Err("compilerBranding must be true or false; attribution stays enabled unless explicitly disabled".into()),
     }
 }
+/// Per-file attribution remains the default; page scope is an explicit author choice, not branding opt-out.
+pub fn asset_comments(config:&crate::Json)->Result<bool,String> {
+    let enabled=enabled(config)?;
+    let crate::Json::Obj(fields)=config else {unreachable!()};
+    let values:Vec<_>=fields.iter().filter(|(key,_)|key=="compilerBrandingScope").collect();
+    if values.len()>1 {return Err("compilerBrandingScope must be declared once".into())}
+    match values.first().map(|(_,value)|value) {
+        None => Ok(enabled),
+        Some(crate::Json::Str(value)) if value=="file" => Ok(enabled),
+        Some(crate::Json::Str(value)) if value=="page" => Ok(false),
+        _=>Err("compilerBrandingScope must be file or page; page keeps document and build attribution without repeating browser asset comments".into()),
+    }
+}
 pub fn code_with(source:&str,enabled:bool)->String {if enabled {code(source)} else {source.into()}}
 
 /// Add a valid JS/CSS comment after minification, retaining shebang/@charset placement.
@@ -41,6 +54,18 @@ mod tests {
         for source in [r#"{"compilerBranding":"false"}"#,r#"{"compilerBranding":null}"#,r#"{"compilerBranding":0}"#,r#"{"compilerBranding":false,"compilerBranding":true}"#] {assert!(enabled(&crate::Json::parse(source).unwrap()).is_err());}
         assert_eq!(code_with("export const value=1",false),"export const value=1");
         let authored=format!("const example={:?}",CODE);assert_eq!(code_with(&authored,false),authored);
+    }
+
+    #[test]
+    fn page_scope_reduces_asset_comments_without_disabling_document_branding() {
+        for (source,wanted,document) in [("{}",true,true),(r#"{"compilerBrandingScope":"file"}"#,true,true),(r#"{"compilerBrandingScope":"page"}"#,false,true),(r#"{"compilerBranding":false,"compilerBrandingScope":"file"}"#,false,false)] {
+            let config=crate::Json::parse(source).unwrap();
+            assert_eq!(asset_comments(&config).unwrap(),wanted);
+            assert_eq!(enabled(&config).unwrap(),document);
+        }
+        for source in [r#"{"compilerBrandingScope":false}"#,r#"{"compilerBrandingScope":"none"}"#,r#"{"compilerBrandingScope":null}"#,r#"{"compilerBrandingScope":"page","compilerBrandingScope":"file"}"#] {
+            assert!(asset_comments(&crate::Json::parse(source).unwrap()).is_err());
+        }
     }
 
     #[test]

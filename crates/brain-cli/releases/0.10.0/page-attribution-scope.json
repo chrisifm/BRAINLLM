@@ -1,0 +1,26 @@
+{
+  "id": "page-attribution-scope",
+  "kind": "capability",
+  "title": "Optional page-level compiler attribution",
+  "why": "The default per-file attribution remains unchanged. An explicit page scope removes compiler-owned browser chunk comments before hashing and compression while preserving page/discovery credit and authored/license bytes.",
+  "changelog": [
+    "Explicit page-level attribution reduces repeated chunk signatures"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "apis": [
+    "compilerBrandingScope"
+  ],
+  "affects": [
+    "brain.json"
+  ],
+  "adopt": {
+    "file": "brain.json",
+    "snippet": "{\"compilerBrandingScope\":\"page\"}"
+  },
+  "uses": [
+    {
+      "glob": "brain.json",
+      "contains": "\"compilerBrandingScope\""
+    }
+  ]
+}

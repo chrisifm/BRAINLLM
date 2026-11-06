@@ -335,12 +335,14 @@ test('both emitted production and development sidecar layouts load their private
   const server=readFileSync(new URL('../server/server.mjs',import.meta.url),'utf8')
   const helper=readFileSync(new URL('../server/native-sockets.mjs',import.meta.url),'utf8')
   const llm=readFileSync(new URL('../server/llm.mjs',import.meta.url),'utf8')
+  const redis=readFileSync(new URL('../server/redis-cache.mjs',import.meta.url),'utf8')
   for(const production of [false,true]) {
     const folder=join(directory,production?'dist':'sidecar')
     mkdirSync(join(folder,'_server'),{recursive:true})
     writeFileSync(join(folder,production?'_server/native-sockets.mjs':'native-sockets.mjs'),helper)
     writeFileSync(join(folder,production?'_server/llm.mjs':'llm.mjs'),llm)
-    writeFileSync(join(folder,'server.mjs'),production?server.replace("from './native-sockets.mjs'","from './_server/native-sockets.mjs'").replace("from './llm.mjs'","from './_server/llm.mjs'"):server)
+    writeFileSync(join(folder,production?'_server/redis-cache.mjs':'redis-cache.mjs'),redis)
+    writeFileSync(join(folder,'server.mjs'),production?server.replace("from './native-sockets.mjs'","from './_server/native-sockets.mjs'").replace("from './llm.mjs'","from './_server/llm.mjs'").replace("from './redis-cache.mjs'","from './_server/redis-cache.mjs'"):server)
     const loaded=await import(pathToFileURL(join(folder,'server.mjs')).href)
     assert.equal(typeof loaded.createServer,'function')
     if(production) {
@@ -351,6 +353,8 @@ test('both emitted production and development sidecar layouts load their private
         assert.equal(response.status,404)
         assert.equal((await response.text()).includes('installNativeSockets'),false)
         assert.equal((await fetch(`http://127.0.0.1:${server.address().port}/_server/llm.mjs`)).status,404)
+        const redisReply=await fetch(`http://127.0.0.1:${server.address().port}/_server/redis-cache.mjs`)
+        assert.equal(redisReply.status,404); assert.equal((await redisReply.text()).includes('createRedisCache'),false)
       } finally {await new Promise(resolve=>{server.close(resolve);server.closeAllConnections()})}
     }
   }

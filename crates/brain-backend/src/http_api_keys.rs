@@ -71,6 +71,8 @@ fn quota_headers(response: &mut Response, quota: &QuotaState) {
 
 /// Runs for every request. Without a presented key it is a no-op.
 pub(super) async fn gate(State(app): State<App>, req: Request, next: Next) -> Response {
+    // Anonymous document performance never resolves an unrelated credential. Origin protection still applies.
+    if req.uri().path() == "/_brain/vitals" { return next.run(req).await; }
     let Some(raw) = api_keys::presented(req.headers()).map(str::to_owned) else {
         return next.run(req).await;
     };

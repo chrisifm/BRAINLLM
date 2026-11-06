@@ -32,6 +32,11 @@ Applying a backend contract change in CI has no prompt: `brain backend approve-c
 
 ## Checking the build output
 
+`brain edge check|audit --url <origin>` compares the local build's cache declarations with bounded
+anonymous live headers. Explicit Cloudflare `plan|audit|apply` is documented in [EDGE.md](EDGE.md);
+applying a reviewed provider plan is a separate explicit operation. `brain db audit` observes only the
+connected database/role; see [database-audit.md](backend/database-audit.md).
+
 Every `brain build` reads `dist` back and warns about text of 1400 bytes or more with no `.br` or `.gz` (B1895), a compressed copy of an already compressed format (B1896), a `_headers` cache policy that does not match the file name (B1897), a wrong `Content-Type` or missing charset (B1898), and a page asking for more than 40 files as it loads (B1899). A clean build has none; they usually mean another step changed `dist` afterwards.
 
 ## One gate before a release
@@ -165,3 +170,9 @@ commit the npm lockfile and explicitly select GitHub Actions in repository Pages
 the configured base against configure-pages metadata, builds with its HTTPS origin, uploads dist only and deploys with
 scoped Pages/OIDC permissions. Account/custom-domain root and repository-prefix sites share the same artifact root.
 See `brain guide github-pages`. No site or GitHub settings are changed by preparing the preview.
+
+## Optional readiness preparation and error reporting
+
+Use [explicit startup data warmup](STARTUP-WARMUP.md) for a small set of anonymous public cached SSR reads before readiness. Its absolute deadline includes imports and cleanup; blocking or uncanceled work cannot continue behind a ready process. The option is absent by default and unavailable to static exports.
+
+[Optional browser error reporting](SENTRY.md) uses the existing Node server, explicit analytics consent and private runtime configuration. Keep generated maps outside deployment artifacts; provider uploads remain a separate explicit operator action. Invalid private configuration fails before application warmup.

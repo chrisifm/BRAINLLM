@@ -63,6 +63,18 @@ fn budget_failure_reports_current_seo_but_never_reuses_stale_pages_after_source_
     assert_eq!(fs::read_to_string(app.join("brain.json")).unwrap(), config, "doctor must never raise a budget");
     let (ok, output) = command(&app, &["build", "--json"]);
     assert!(!ok && output.contains("budget.viewKB exceeded"), "normal builds remain gated: {output}");
+    for diagnostic in report["build"]["error"].as_str().unwrap().lines() {
+        let measured = diagnostic.split("; fix:").next().unwrap();
+        assert!(output.contains(measured), "default doctor and production build must measure the same route bytes, not a placeholder SEO simulation: {measured}\n{output}");
+    }
+    let built_html = fs::read_to_string(app.join("dist/index.html")).unwrap();
+    let marker = "<meta name=\"brain-build\" content=\"";
+    let signature = built_html.split_once(marker).unwrap().1.split('"').next().unwrap();
+    assert_eq!(signature, report["build"]["signature"].as_str().unwrap());
+    assert_eq!(report["build"]["matchesProductionBuildInputs"], true);
+    assert_eq!(report["seo"]["outputScope"], "placeholder-origin-model");
+    assert_eq!(report["seo"]["matchesProductionBuildOutput"], false);
+    assert_eq!(report["seo"]["usedForPayloadBudget"], false);
     fs::write(app.join("comp/broken.brain"), "<script>\nlet broken =\n</script>\n<p>Broken</p>\n").unwrap();
     fs::write(app.join("dist/index.html"), stale).unwrap();
     let (ok, output) = command(&app, &["doctor", "--json"]);

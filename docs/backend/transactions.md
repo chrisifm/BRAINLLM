@@ -82,6 +82,11 @@ otherwise).
 
 ## Authority and limits
 
+- Explicit `systemOnly:true` replaces role grants for an action, transition or operation. Omit `roles`; declaring
+  both is an error. Only an operator-issued system key, verified by the native API-key gate, qualifies. Admin sessions,
+  ordinary keys and an ordinary role named `system` remain denied. Resource scopes are still required for actions
+  and transitions; operations need their explicit `operations.<name>:write` scope. An operation that invokes a
+  system-only action or transition must itself be system-only; role grants cannot open an indirect bypass.
 - `roles` lists configured role names (not `owner` or `public`); the caller must have one of them. The operation's
   roles replace the resource write policies for its steps, so keep each operation narrow and use `owned: true` for
   per-user rows. Every keyed step applies the resource's read policy: a `read`, `update`, `delete`, action or transition

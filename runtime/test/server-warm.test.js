@@ -21,7 +21,7 @@ const imported = () => (existsSync(marks) ? readFileSync(marks, 'utf8').split('\
 mkdirSync(join(dist, '_b'), { recursive: true })
 copyFileSync(join(here, '../brain.js'), join(dist, '_b/brain.js'))
 w('_server/dom.js', readFileSync(join(here, '../shim/dom.js'), 'utf8'))
-for (const f of ['server.mjs', 'llm.mjs', 'native-sockets.mjs']) copyFileSync(join(here, '../server', f), join(dist, f))
+for (const f of ['server.mjs', 'llm.mjs', 'native-sockets.mjs', 'redis-cache.mjs']) copyFileSync(join(here, '../server', f), join(dist, f))
 w('_b/a.js', `${mark('view')}import { tpl } from '/_b/brain.js'\nexport default function A(p) { return tpl('<p>n ' + p.n + '</p>')() }\n`)
 w('_b/l.js', `${mark('layout')}import { tpl } from '/_b/brain.js'\nexport default function L(p) { return p.children() }\n`)
 w('_server/a.server.mjs', `${mark('server')}export function load() { return { n: 1 } }\n`)

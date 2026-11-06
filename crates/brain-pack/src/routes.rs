@@ -189,8 +189,70 @@ pub fn resolve<'a>(table: &'a [RouteDef], url_path: &str) -> Option<(&'a RouteDe
     table.iter().find_map(|r| matches(&r.path, url_path).map(|p| (r, p)))
 }
 
+/// Load and validate the opt-in against the canonical, filename-discovered frontend route table.
+pub fn constraints(root: &Path, table: &[RouteDef]) -> Result<brain_lex::param_pattern::RouteParams, String> {
+    bind_constraints(read_constraints(root)?,table)
+}
+fn read_constraints(root:&Path)->Result<brain_lex::param_pattern::RouteParams,String> {
+    let j = match std::fs::read_to_string(root.join("brain.json")) {
+        Ok(src) => brain_lex::Json::parse(&src).map_err(|e|format!("brain.json: {e}"))?,
+        Err(e) if e.kind()==std::io::ErrorKind::NotFound => return Ok(Default::default()),
+        Err(_) => return Err("brain.json cannot be read; fix: check the app configuration file permissions".into()),
+    };
+    brain_lex::param_pattern::from_config(&j)
+}
+fn bind_constraints(params:brain_lex::param_pattern::RouteParams,table:&[RouteDef])->Result<brain_lex::param_pattern::RouteParams,String> {
+    for route in params.keys() {
+        if !table.iter().any(|r| &r.path==route) {return Err(format!("brain.json routeParams route `{route}` does not exist; fix: use its exact brain map path"));}
+    }
+    Ok(params)
+}
+
+/// Asset/runtime requests without this opt-in never walk the frontend source tree.
+pub fn validate_request_constraints(root:&Path)->Result<(),String> {
+    validate_request_constraints_by(root,||discover(root))
+}
+fn validate_request_constraints_by(root:&Path,table:impl FnOnce()->Vec<RouteDef>)->Result<(),String> {
+    let params=read_constraints(root)?;
+    if params.is_empty() {return Ok(());}
+    bind_constraints(params,&table()).map(|_|())
+}
+
+/// `brain check` adds this new diagnostic only for an explicitly opted-in, parsed configuration.
+/// Existing generic JSON diagnostics remain responsible for malformed legacy configuration.
+pub fn check_constraints(root:&Path)->Result<(),String> {
+    let Ok(source)=std::fs::read_to_string(root.join("brain.json")) else{return Ok(());};
+    let Ok(j)=brain_lex::Json::parse(&source) else{return Ok(());};
+    if j.get("routeParams").is_none() {return Ok(());}
+    constraints(root,&discover(root)).map(|_|())
+}
+
+pub fn matches_with(pattern:&str,url_path:&str,constraints:&brain_lex::param_pattern::Params)->Option<Vec<(String,String)>> {
+    // Reject an oversized constrained segment before the ordinary matcher clones parameter values.
+    for (key,value) in pattern.split('/').filter(|s|!s.is_empty()).zip(url_path.split('/').filter(|s|!s.is_empty())) {
+        if key.strip_prefix(':').and_then(|name|constraints.get(name)).is_some_and(|p|!p.matches(value)) {return None;}
+    }
+    let params=matches(pattern,url_path)?;
+    constraints.iter().all(|(name,p)|params.iter().find(|(k,_)|k==name).is_some_and(|(_,v)|p.matches(v))).then_some(params)
+}
+
+pub fn resolve_with<'a>(table:&'a [RouteDef], constraints:&brain_lex::param_pattern::RouteParams, url_path:&str)->Option<(&'a RouteDef,Vec<(String,String)>)> {
+    resolve_request(table,constraints,url_path,url_path)
+}
+
+/// Dev preserves its historical decoded dispatch for legacy candidates; an opted-in route uses the wire path.
+pub fn resolve_request<'a>(table:&'a [RouteDef],constraints:&brain_lex::param_pattern::RouteParams,decoded:&str,raw:&str)->Option<(&'a RouteDef,Vec<(String,String)>)> {
+    table.iter().find_map(|r| match constraints.get(&r.path).filter(|p|!p.is_empty()) {
+        Some(p)=>matches_with(&r.path,raw,p),None=>matches(&r.path,decoded)
+    }.map(|p|(r,p)))
+}
+
 /// JavaScript regex source for `pattern`, the same rules as `matches` (named groups = params): what server.mjs uses.
 pub fn regex_source(pattern: &str) -> String {
+    regex_source_with(pattern, &Default::default())
+}
+
+pub fn regex_source_with(pattern: &str, params: &brain_lex::param_pattern::Params) -> String {
     if pattern == "*" {
         return "^/.*$".into();
     }
@@ -199,7 +261,10 @@ pub fn regex_source(pattern: &str) -> String {
     for p in &segs {
         s.push('/');
         if let Some(n) = p.strip_prefix(':') {
-            s.push_str(&format!("(?<{n}>(?![_.])[^/\\\\]+)"));
+            match params.get(n) {
+                Some(p) => s.push_str(&format!("(?<{n}>(?![_.]){})",p.regex_source())),
+                None => s.push_str(&format!("(?<{n}>(?![_.])[^/\\\\]+)")),
+            }
         } else if let Some(n) = p.strip_prefix('*') {
             s.push_str(&format!("(?<{n}>(?![_.])[^/\\\\]+(?:/(?![_.])[^/\\\\]+)*)"));
         } else {
@@ -286,5 +351,52 @@ mod tests {
         assert_eq!(t[1].view, "views/a.brain");
         assert_eq!(t[2].layouts, ["views/_layout.brain", "views/users/_layout.brain"]);
         let _ = std::fs::remove_dir_all(&d);
+    }
+}
+
+#[cfg(test)]
+mod constraint_tests {
+    use super::*;
+    #[test]
+    fn constrained_candidates_keep_static_catchall_and_raw_encoding() {
+        let mut table=vec![RouteDef{path:"/:code".into(),view:"views/[code].brain".into(),layouts:vec![]},RouteDef{path:"/2abcdef".into(),view:"views/2abcdef.brain".into(),layouts:vec![]},RouteDef{path:"/*rest".into(),view:"views/[...rest].brain".into(),layouts:vec![]}];
+        table.sort_by(|a,b|order(&a.path,&b.path));
+        let j=brain_lex::Json::parse(r#"{"routeParams":{"/:code":{"code":"[2-9a-z]{7}"}}}"#).unwrap();
+        let constraints=brain_lex::param_pattern::from_config(&j).unwrap();
+        assert_eq!(resolve_with(&table,&constraints,"/2abcdef").unwrap().0.path,"/2abcdef");
+        assert_eq!(resolve_with(&table,&constraints,"/3abcdef").unwrap().0.path,"/:code");
+        for path in ["/zzz","/%32abcde","/a/b"] {assert_eq!(resolve_with(&table,&constraints,path).unwrap().0.path,"/*rest");}
+        for path in ["/_hidden","/.hidden","/ab\\cd"] {assert!(resolve_with(&table,&constraints,path).is_none());}
+        assert_eq!(matches("/:code","/%32abcde").unwrap()[0].1,"%32abcde");
+        assert!(regex_source_with("/:code",constraints.get("/:code").unwrap()).contains("\\x32-\\x39"));
+        assert_eq!(regex_source_with("/:code",&Default::default()),regex_source("/:code"));
+    }
+    #[test]
+    fn unused_constraints_never_discover_routes_during_asset_requests() {
+        let root=std::env::temp_dir().join(format!("brain-constraint-no-opt-in-{}",std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();std::fs::write(root.join("brain.json"),"{}").unwrap();
+        assert!(validate_request_constraints_by(&root,||panic!("unused route table was discovered")).is_ok());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn missing_route_is_an_actionable_configuration_error() {
+        let root=std::env::temp_dir().join(format!("brain-constraint-config-{}",std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("brain.json"),r#"{"routeParams":{"/:id":{"id":"[a-z]{2}"}}}"#).unwrap();
+        assert!(constraints(&root,&[]).unwrap_err().contains("does not exist"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod wire_constraint_tests {
+    use super::*;
+    #[test]
+    fn request_metadata_changes_only_opted_in_candidate_matching() {
+        let table=vec![RouteDef{path:"/:code".into(),view:"views/[code].brain".into(),layouts:vec![]}];
+        let j=brain_lex::Json::parse(r#"{"routeParams":{"/:code":{"code":"[2-9a-z]{7}"}}}"#).unwrap();let cfg=brain_lex::param_pattern::from_config(&j).unwrap();
+        assert!(resolve_request(&table,&cfg,"/2abcdef","/%32abcdef").is_none());
+        assert_eq!(resolve_request(&table,&Default::default(),"/2abcdef","/%32abcdef").unwrap().1[0].1,"2abcdef");
+        assert_eq!(resolve_request(&table,&cfg,"/2abcdef","/2abcdef").unwrap().1[0].1,"2abcdef");
     }
 }

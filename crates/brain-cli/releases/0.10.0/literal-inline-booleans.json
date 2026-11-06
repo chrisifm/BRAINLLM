@@ -1,0 +1,16 @@
+{
+  "id": "literal-inline-booleans",
+  "kind": "internal",
+  "title": "Prune inert literal boolean branches per inline UI use",
+  "why": "Already-inlineable stateless production UI can select known boolean branches only when selected markup is static native inert HTML/SVG. Dynamic or owner-sensitive branches keep when; no runtime API or whole-program caller inference is introduced.",
+  "changelog": [
+    "Per-use literal booleans prune inert static UI branches"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "apis": [
+    "ui/ components"
+  ],
+  "affects": [
+    "ui/*.brain"
+  ]
+}

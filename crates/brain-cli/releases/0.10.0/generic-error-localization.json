@@ -1,0 +1,29 @@
+{
+  "id": "generic-error-localization",
+  "kind": "capability",
+  "title": "Localized generic error pages",
+  "why": "Four flat dictionary values customize generic fallback copy with locale/English fallback and a scoped stylesheet. Escaped content participates in the build signature; authored error pages and API responses retain precedence.",
+  "changelog": [
+    "Generic error pages use escaped locale-specific fallback copy"
+  ],
+  "guide": "docs/HTTP-RESPONSES.md",
+  "apis": [
+    "http.error.title",
+    "http.error.message",
+    "http.error.reference",
+    "http.error.home"
+  ],
+  "affects": [
+    "i18n/*.json"
+  ],
+  "adopt": {
+    "file": "i18n/en.json",
+    "snippet": "{\"http.error.title\":\"Something went wrong\",\"http.error.home\":\"Home\"}"
+  },
+  "uses": [
+    {
+      "glob": "i18n/*.json",
+      "contains": "http.error."
+    }
+  ]
+}

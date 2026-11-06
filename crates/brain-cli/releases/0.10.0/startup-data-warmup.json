@@ -1,0 +1,26 @@
+{
+  "id": "startup-data-warmup",
+  "kind": "capability",
+  "title": "Explicit bounded SSR startup reads",
+  "why": "A small exact public cached SSR working set can be read before readiness under one absolute module/data/cleanup deadline. Static output rejects the option; failures never continue behind a ready process.",
+  "changelog": [
+    "Opt-in startup data warmup prepares exact cached public SSR routes"
+  ],
+  "guide": "docs/STARTUP-WARMUP.md",
+  "apis": [
+    "server.warmup"
+  ],
+  "affects": [
+    "brain.json"
+  ],
+  "adopt": {
+    "file": "brain.json",
+    "snippet": "{\"server\":{\"warmup\":{\"paths\":[\"/catalog\"],\"timeoutMs\":8000,\"onError\":\"continue\"}}}"
+  },
+  "uses": [
+    {
+      "glob": "brain.json",
+      "contains": "\"warmup\""
+    }
+  ]
+}

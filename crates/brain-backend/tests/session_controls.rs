@@ -36,6 +36,7 @@ fn roles() -> brain_backend::auth_flows::RolesConfig {
 }
 fn config() -> brain_backend::Config {
     brain_backend::Config {
+        vitals: None,
         api_keys: Some(Default::default()),
         roles: roles(),
         mail: None,
@@ -45,7 +46,7 @@ fn config() -> brain_backend::Config {
         sockets: None,
         gcs: None,
         jwt: None,
-        google: None, apple: None, linkedin: None,
+        google: None, apple: None, apple_native: None, linkedin: None,
         resources: Vec::new(),
         jobs: Vec::new(),
         uploads: std::env::temp_dir().join(format!("brain-sessions-{}", Uuid::new_v4().simple())),

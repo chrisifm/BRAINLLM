@@ -36,6 +36,16 @@ The Node production server's `redirect(path, status)` uses the same redirect cod
 
 ## Evidence and standards
 
+`brain backend conform --url http://127.0.0.1:5182 --path /api/items --json` observes the JSON response contract
+of concrete read-only paths, including app-owned routes. Repeat `--path` for at most eight distinct paths; without
+paths it checks `/health` and a deliberately absent API resource. It sends anonymous GET/HEAD with
+`Accept: application/json`, follows no redirects and sends no writes. It checks JSON MIME/body/error shape,
+paired HEAD status/MIME, `Allow` on 405 and `Retry-After` on 429. Bodies and error-code values are not echoed.
+Each request is bounded to three seconds and 256 KiB, under a thirty-second overall deadline. Exit 0 means these
+observations conform, 1 means observed differences, and 2 means invalid input or an incomplete observation.
+It does not prove write-path behavior, authorization, indexing or full HTTP standards compliance. The repository's
+separate four-surface HTTP truth-table gate exercises the declared write/error shapes in disposable test apps.
+
 Focused Node tests exercise every registered 4xx/5xx status recognized by the installed Node HTTP implementation, custom 404/410 pages, HTML/JSON negotiation, HEAD, method headers, trace references and redirect defenses. Rust unit tests cover helper validation, custom JSON/challenge preservation, negotiation and empty bodies; execute them before release.
 
 The implementation follows [RFC 9110 HTTP semantics](https://www.rfc-editor.org/rfc/rfc9110.html), including HEAD and status-specific body rules, and [Axum's response contract](https://docs.rs/axum/latest/axum/response/index.html). A document can be customized without exposing a private exception or weakening cache/security defaults.

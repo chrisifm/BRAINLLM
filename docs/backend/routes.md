@@ -49,6 +49,39 @@ including proven aliases such as `const h = ctx.headers`. Use the lowercase head
 add a safe header to `headers` when needed; authentication uses `ctx.user`. The checker never forwards
 headers automatically and skips evidence obscured by unknown keys, mutation or escaping references.
 
+## Provider-specific signature verification
+
+For a provider whose signature protocol is not HMAC, declare `body: 'raw', auth: 'public',
+verify: { scheme: 'custom' }` and add a private sibling `verify.jsbrain`:
+
+```js
+<meta server>
+import verifyProvider from '../../lib/verify-provider.jsbrain'
+export default async function verify(ctx) {
+  return await verifyProvider(ctx.rawBody, ctx.rawBodyEncoding, ctx.headers, ctx.env)
+}
+```
+
+The default export must resolve to the boolean `true` before the handler can run. It receives only
+`rawBody`, `rawBodyEncoding`, explicitly declared headers and the selected environment. It has no
+visitor identity, backend client or system-key authority. Route backend credentials are removed from
+the verifier's environment. B0816 checks literal header reads in both siblings. Every declared header
+must occur once on the incoming request; duplicate values are rejected before verification on every gateway.
+
+The application verifier implements the provider's actual protocol: bind the signature to these exact
+body bytes, validate its timestamp and certificate/key chain, pin permitted key endpoints, bound key
+fetches and persist replay protection when required. A caller-supplied certificate URL is not a trusted
+key source. Returning a truthy object, decoding a token without verifying it, or merely fetching a
+certificate never authenticates an event. There is no generic provider verification shortcut.
+
+Custom verification is available only for raw public POST, PUT, PATCH and DELETE routes. It replaces
+the browser Origin requirement with successful cryptographic verification; it does not weaken Origin
+checks on ordinary public writes. False or non-boolean results answer `401 SIGNATURE_INVALID`;
+verifier failures answer `503 VERIFIER_UNAVAILABLE`. Verification and the handler share the route's
+single absolute timeout, including queue/executor admission; expiry answers `504 ROUTE_TIMEOUT` and
+terminates the owned sidecar invocation. The backend refuses startup if the verifier is missing or is
+not callable. Keep verification inexpensive and set bounded provider timeouts inside that total budget.
+
 ## Handler
 
 ```js

@@ -73,6 +73,27 @@ Policy grants: `public` `owner` `owner.<ref>` `org` `org.<role>` `org.own` `<rol
 
 ## Added by release
 
+### 0.10.0
+
+- List and compound aggregate dimensions (`docs/backend/aggregates.md`)
+- Separate Apple native application audiences (`docs/APPLE-LINKEDIN.md`)
+- Bounded author and adoption observations (`docs/INTERNALS.md`)
+- Reviewed computed-data backfill batches (`docs/backend/backfills.md`)
+- Declared raw route verification (`docs/backend/routes.md`)
+- Bounded current-database audit (`docs/backend/database-audit.md`)
+- Declared and observed edge delivery (`docs/EDGE.md`)
+- Bounded raw frontend route predicates (`docs/ROUTE-CONSTRAINTS.md`)
+- Localized generic error pages (`docs/HTTP-RESPONSES.md`)
+- Explicit basic-mode Google event bridge (`docs/GOOGLE-ANALYTICS.md`)
+- Live preview and sitemap coverage review (`docs/SEO-SITE.md`)
+- Independent anonymous document-performance aggregates (`docs/backend/vitals.md`)
+- Optional private browser error reporting (`docs/SENTRY.md`)
+- Optional page-level compiler attribution (`docs/INTERNALS.md`)
+- Per-view review actions from actual evidence (`docs/INTERNALS.md`)
+- Optional private Redis cache (`docs/REDIS-CACHE.md`)
+- Explicit bounded SSR startup reads (`docs/STARTUP-WARMUP.md`)
+- Explicit operator-only operation grants (`docs/backend/transactions.md`)
+
 ### 0.9.0
 
 - Explicit per-project compiler attribution policy (`brain guide seo`)

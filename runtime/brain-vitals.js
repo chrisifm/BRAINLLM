@@ -45,14 +45,20 @@ export function vitals(report, env = globalThis) {
 
 // One beacon each time the page is hidden, with what changed since the last one; the query string is never sent.
 export function reportVitals(url, env = globalThis) {
-  if (typeof url !== 'string' || !url.startsWith('/')) throw new TypeError('reportVitals(url): pass a same-origin path, such as "/api/vitals"')
+  if (typeof url !== 'string' || url.length > 2048 || !url.startsWith('/') || url.startsWith('//') || /[\\\u0000-\u0020\u007f]/.test(url)) throw new TypeError('reportVitals(url): pass a same-origin path, such as "/api/vitals"')
+  let target
+  try {
+    const base = new URL(env.location.href)
+    target = new URL(url, base)
+    if (!/^https?:$/.test(base.protocol) || target.origin !== base.origin) throw new TypeError()
+  } catch { throw new TypeError('reportVitals(url): a same-origin HTTP(S) page is required') }
   const doc = env.document
   const fresh = new Map()
   const stop = vitals(metric => fresh.set(metric.name, metric), env)
   const flush = () => {
     if (doc.visibilityState !== 'hidden' || !fresh.size) return
     const body = JSON.stringify({ path: env.location.pathname, metrics: [...fresh.values()] })
-    if (env.navigator.sendBeacon?.(url, new Blob([body], { type: 'application/json' }))) fresh.clear()
+    if (env.navigator.sendBeacon?.(target.href, new Blob([body], { type: 'application/json' }))) fresh.clear()
   }
   doc.addEventListener('visibilitychange', flush)
   env.addEventListener('pagehide', flush)

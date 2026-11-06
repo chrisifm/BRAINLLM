@@ -455,6 +455,12 @@ pub const CATALOG: &[(&str, &str, &str, &str)] = &[
         "`seo-urls.txt` lists the published URLs in git, so the comparison survives a clean clone. A listed URL that no longer exists needs a redirect, or its line removed on purpose.",
         "[{ \"from\": \"/old\", \"to\": \"/new\" }] in redirects.json",
     ),
+    (
+        "B1880",
+        "Invalid route parameter constraints",
+        "Explicit routeParams and redirect params use bounded deterministic ASCII segment patterns. Names must be unique and belong to an existing canonical frontend route; the same matcher runs before load in dev, SSG and SSR.",
+        "{ \"routeParams\": { \"/:code\": { \"code\": \"[2-9a-z]{7}\" } } }",
+    ),
 ];
 
 /// Arial advance widths in 1/1000 em for ASCII 32..=126 (what search results use to cut titles and snippets).
@@ -498,6 +504,11 @@ pub(crate) fn anchor_internal(cfg: &Config, from: &str, anchor: &crate::html::An
 
 /// Internal target of `href` on page `from`: `(path, fragment)`; `None` for external or non-HTTP links.
 pub fn internal(cfg: &Config, from: &str, href: &str) -> Option<(String, String)> {
+    internal_raw(cfg,from,href).map(|(path,frag)|(norm(&path),frag))
+}
+
+/// The same internal target before percent decoding: route constraints match the original wire segment.
+pub fn internal_raw(cfg: &Config, from: &str, href: &str) -> Option<(String, String)> {
     let h = href.trim();
     let lower = h.to_ascii_lowercase();
     if h.is_empty()
@@ -533,17 +544,23 @@ pub fn internal(cfg: &Config, from: &str, href: &str) -> Option<(String, String)
     } else {
         abs_path(from, path)
     };
-    Some((norm(cfg.strip_base(&path)), frag.to_string()))
+    let path=cfg.strip_base(&path);
+    Some((path.to_string(),frag.to_string()))
 }
 
 /// `/a/` → `/a`, `/a/index.html` → `/a`, `/b%20c` → `/b c` (percent-decoded so encoded and raw forms compare equal).
 pub fn norm(path: &str) -> String {
+    percent_decode(&raw_norm(path))
+}
+
+/// Trailing slash/index normalization without changing the wire encoding of constrained parameters.
+pub fn raw_norm(path:&str)->String {
     let p = path.strip_suffix("index.html").unwrap_or(path);
     let p = p.trim_end_matches('/');
     if p.is_empty() {
         "/".into()
     } else {
-        percent_decode(p)
+        p.to_string()
     }
 }
 
@@ -1458,6 +1475,7 @@ pub fn audit(site: &Site) -> Report {
             let Some((path, frag)) = anchor_internal(cfg, &p.route, a) else {
                 continue;
             };
+            let raw_path=internal_raw(cfg,&p.route,&a.href).map(|(path,_)|path).unwrap_or_else(||path.clone());
             let target = if path == norm(&p.route) {
                 Some(doc)
             } else {
@@ -1467,12 +1485,12 @@ pub fn audit(site: &Site) -> Report {
                     .map(|j| &docs[j])
             };
             let exists = target.is_some()
-                || site.routes.iter().any(|r| matches_pattern(r, &path))
+                || site.routes.iter().any(|r| matches_pattern(r, &path) && site.cfg.route_allows(r,&raw_path))
                 || site.asset_size(&path).is_some();
             let redirected = site
                 .redirects
                 .iter()
-                .find_map(|r| crate::redirects::apply(r, &path));
+                .find_map(|r| crate::redirects::apply(r, if r.params.is_empty(){&path}else{&raw_path}));
             if let (false, Some(to)) = (exists, &redirected) {
                 s.note(
                     "B1825",

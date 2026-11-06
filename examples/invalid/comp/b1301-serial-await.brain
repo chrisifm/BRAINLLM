@@ -1,0 +1,9 @@
+<script>
+const read = async (value) => value
+const collect = async (items) => {
+  for (const item of items) {
+    await read(item)
+  }
+}
+</script>
+<button type="button" on:click={() => collect([1, 2])}>Read items</button>

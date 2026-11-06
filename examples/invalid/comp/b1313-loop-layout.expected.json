@@ -1,0 +1,12 @@
+[
+  {
+    "code": "B1313",
+    "file": "invalid/comp/b1313-loop-layout.brain",
+    "line": 8,
+    "col": 21,
+    "msg": "A layout read follows a DOM write in this loop; this may force synchronous layout.",
+    "fix": "If behavior permits, collect layout reads before applying DOM writes. Measure a browser trace before claiming a speedup; no reordering is applied.",
+    "level": "warning",
+    "edits": []
+  }
+]

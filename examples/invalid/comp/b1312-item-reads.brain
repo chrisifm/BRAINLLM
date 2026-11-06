@@ -1,0 +1,9 @@
+<script>
+import items from './b1312-support/api.jsbrain'
+const collect = async (ids) => {
+  for (const id of ids) {
+    await items.get(id)
+  }
+}
+</script>
+<button type="button" on:click={() => collect(['a', 'b'])}>Read records</button>

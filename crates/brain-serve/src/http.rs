@@ -62,6 +62,8 @@ pub(crate) fn request_id() -> String {
 /// Wire facts needed only when an HTTP connection is transferred to an opaque Upgrade tunnel.
 #[derive(Default)]
 pub(crate) struct UpgradeMetadata {
+    /// Original bounded target for explicitly constrained frontend matching, never filesystem/native dispatch.
+    pub(crate) raw_path: Option<String>,
     pub version: String,
     pub query_present: bool,
     pub head: Vec<u8>,
@@ -91,6 +93,7 @@ pub struct Request {
 }
 
 impl Request {
+    pub(crate) fn raw_path(&self)->&str {self.upgrade.raw_path.as_deref().unwrap_or(&self.path)}
     pub fn header(&self, name: &str) -> Option<&str> {
         self.headers
             .iter()
@@ -255,6 +258,7 @@ pub(crate) fn read_request_planned<R: Read>(
     if matches!(plan, BodyPlan::Stream(_)) && !upload {
         return Ok(Request {
             upgrade: UpgradeMetadata {
+                raw_path: Some(raw_path.into()),
                 version: parts[2].into(),
                 query_present: parts[1].contains('?'),
                 head: reader.buffer().to_vec(),
@@ -276,6 +280,7 @@ pub(crate) fn read_request_planned<R: Read>(
     body.resize(length, 0);
     reader.read_exact(&mut body)?;
     let upgrade = UpgradeMetadata {
+        raw_path: Some(raw_path.into()),
         version: parts[2].into(),
         query_present: parts[1].contains('?'),
         head: if header("upgrade").is_some() {
@@ -689,5 +694,19 @@ mod tests {
             ),
             400
         );
+    }
+}
+
+#[cfg(test)]
+mod raw_constraint_tests {
+    use super::*;
+    #[test]
+    fn constrained_frontend_can_inspect_wire_path_without_changing_decoded_dispatch() {
+        let r=read_request(&b"GET /%32abcdef?q=one HTTP/1.1\r\nHost: localhost\r\n\r\n"[..]).unwrap();
+        assert_eq!(r.path,"/2abcdef");assert_eq!(r.raw_path(),"/%32abcdef");assert_eq!(r.query,"q=one");
+        let r=read_request_planned(&b"POST /api/%69tems HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1\r\n\r\nx"[..],None,65536,None,&|path,method|{
+            assert_eq!(method,"POST");assert_eq!(path,"/api/items");BodyPlan::Stream(16)
+        }).unwrap();
+        assert_eq!(r.path,"/api/items");assert_eq!(r.raw_path(),"/api/%69tems");assert_eq!(r.upgrade.stream_body,Some(1));assert!(r.body.is_empty());
     }
 }

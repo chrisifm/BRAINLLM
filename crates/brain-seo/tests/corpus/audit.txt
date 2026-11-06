@@ -1,3 +1,4 @@
+@unreachable B1880 Source configuration error before build: routeParams/redirect params are checked by the shared validators and CLI acceptance, not the built-HTML audit. See route_constraints.rs and scripts/gates/route-constraints.mjs.
 # Each case edits a clean three-page site: `### name`, `@replace <route|*> <old> => <new>`, `@keyword <route> <words>`,
 # `@redirect <rule line>`, `@staging`, `@focus <term>`, `@robots <text with \n>`, `@pad <route> <bytes>`,
 # `@page <route> | <title> | <h1>`, `@expect <code> <route>`.

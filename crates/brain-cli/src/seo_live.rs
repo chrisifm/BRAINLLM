@@ -6,7 +6,8 @@ use brain_lex::Json;
 use brain_seo::{Finding, Level, Page, Site};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use std::cell::Cell;
 
 /// A sample cannot judge the links, anchors or orphans of the pages it left out.
 const SAMPLE_BLIND: [&str; 7] = ["B1812", "B1813", "B1819", "B1820", "B1863", "B1864", "B1865"];
@@ -14,9 +15,10 @@ const SAMPLE_BLIND: [&str; 7] = ["B1812", "B1813", "B1819", "B1820", "B1863", "B
 const CDN_STATUS: [&str; 5] = ["cf-cache-status", "x-vercel-cache", "cdn-cache-status", "x-cache-status", "x-cache"];
 /// Under this a compressed response gains nothing, and servers rightly skip it.
 const COMPRESS_MIN: usize = 1024;
+const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 /// One value only: a second copy is ignored, or makes the browser discard the policy.
 const SINGLE_VALUE: [&str; 5] = ["x-frame-options", "x-content-type-options", "permissions-policy", "referrer-policy", "strict-transport-security"];
-const USAGE: &str = "usage: brain seo audit --url <origin> [--sample N] [--path /route]... [--delay-ms N] [--expect-noindex] [--json]";
+const USAGE: &str = "usage: brain seo audit --url <origin> [--sample N] [--path /route]... [--delay-ms N] [--expect-noindex] [--json]\n       brain seo preview /route --url <origin> [--expect-noindex] [--json]";
 
 pub struct Response {
     pub status: u16,
@@ -56,12 +58,36 @@ pub fn locs(xml: &str) -> Vec<String> {
     xml.split("<loc>").skip(1).filter_map(|part| part.split("</loc>").next()).map(|loc| loc.trim().replace("&amp;", "&")).collect()
 }
 
-/// `n` paths spread over the whole list, so that every kind of page in a sorted sitemap is represented.
+/// Stratify by the first path segment and depth, then round-robin over sorted families. Without a route manifest
+/// these are URL families, not inferred templates; neither the sitemap nor this sampler knows response sizes.
 pub fn spread(paths: &[String], n: usize) -> Vec<String> {
-    if n == 0 || paths.len() <= n {
-        return paths.to_vec();
+    let unique: BTreeSet<&String> = paths.iter().collect();
+    if n == 0 || unique.len() <= n {
+        return unique.into_iter().cloned().collect();
     }
-    (0..n).map(|i| paths[i * paths.len() / n].clone()).collect()
+    let mut groups: BTreeMap<(String, usize), Vec<&String>> = BTreeMap::new();
+    for path in unique {
+        let segments: Vec<&str> = path.split(['?', '#']).next().unwrap_or(path).split('/').filter(|s| !s.is_empty()).collect();
+        // A one-segment page is its own family; deeper siblings share their top-level section and depth.
+        let key = (segments.first().copied().unwrap_or("").to_string(), segments.len());
+        groups.entry(key).or_default().push(path);
+    }
+    let groups: Vec<Vec<&String>> = groups.into_values().collect();
+    let mut used = vec![0; groups.len()];
+    let mut out = Vec::new();
+    while out.len() < n {
+        for (i, group) in groups.iter().enumerate() {
+            let count = used[i];
+            if count < group.len() {
+                // Spread within each family instead of always selecting its initial URLs.
+                let slot = if count == 0 { 0 } else { (group.len() * count / n).max(count).min(group.len() - 1) };
+                out.push((*group[slot]).clone());
+                used[i] += 1;
+                if out.len() == n { break; }
+            }
+        }
+    }
+    out
 }
 
 fn values<'a>(response: &'a Response, name: &str) -> Vec<&'a str> {
@@ -417,60 +443,109 @@ fn live_verdict(text: &str) -> String {
     format!("{}\nfailed: the live checks above found errors\n", body.strip_suffix("\nok").unwrap_or(body))
 }
 
-fn fetch(runtime: &tokio::runtime::Runtime, client: &reqwest::Client, url: &str) -> Result<Response, String> {
-    fetch_with(runtime, client, url, false)
+// A timed-out system resolver can outlive its future. CLI teardown must not wait indefinitely for it.
+struct ObserverRuntime(Option<tokio::runtime::Runtime>);
+impl std::ops::Deref for ObserverRuntime {
+    type Target = tokio::runtime::Runtime;
+    fn deref(&self) -> &Self::Target { self.0.as_ref().unwrap() }
 }
-
-/// The client follows no redirect, so a 301 stays visible. `compressed` asks for an encoding; the client has no
-/// decoder, so that is only for responses judged by their headers.
-fn fetch_with(runtime: &tokio::runtime::Runtime, client: &reqwest::Client, url: &str, compressed: bool) -> Result<Response, String> {
-    runtime.block_on(async {
-        let request = client.get(url);
-        let request = if compressed { request.header("accept-encoding", "gzip, br") } else { request };
-        let response = request.send().await.map_err(|e| format!("{url}: {e}"))?;
-        let status = response.status().as_u16();
-        let headers = response.headers().iter().map(|(k, v)| (k.as_str().to_string(), String::from_utf8_lossy(v.as_bytes()).into_owned())).collect();
-        let body = response.text().await.map_err(|e| format!("{url}: {e}"))?;
-        Ok(Response { status, headers, body })
+impl Drop for ObserverRuntime {
+    fn drop(&mut self) { if let Some(runtime) = self.0.take() { runtime.shutdown_background(); } }
+}
+struct Observation {
+    runtime: ObserverRuntime,
+    client: reqwest::Client,
+    deadline: Instant,
+    requests: Cell<usize>,
+    bytes: Cell<usize>,
+    exhausted: Cell<bool>,
+}
+impl Observation {
+    fn new() -> Result<Self, String> {
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|_|"could not start the HTTP client")?;
+        let client = crate::http_observer::client(reqwest::Client::builder()).no_proxy().retry(reqwest::retry::never()).redirect(reqwest::redirect::Policy::none()).connect_timeout(Duration::from_secs(5)).timeout(Duration::from_secs(30)).user_agent(concat!("brain-seo-audit/", env!("CARGO_PKG_VERSION"))).build().map_err(|_|"could not start the HTTP client")?;
+        Ok(Self {runtime:ObserverRuntime(Some(runtime)),client,deadline:Instant::now()+Duration::from_secs(300),requests:Cell::new(0),bytes:Cell::new(0),exhausted:Cell::new(false)})
+    }
+    fn limit(&self) -> String { self.exhausted.set(true); "live audit incomplete: exceeded its shared 300 second, 4096 request or 128 MiB budget; audit smaller explicit --path batches".into() }
+    fn check(&self) -> Result<(),String> { if self.exhausted.get() || Instant::now()>=self.deadline {Err(self.limit())} else {Ok(())} }
+    fn account(&self, bytes:usize) -> Result<(),String> {
+        self.check()?; self.bytes.set(self.bytes.get().saturating_add(bytes));
+        if self.bytes.get()>128*1024*1024 {Err(self.limit())} else {Ok(())}
+    }
+    fn pause(&self, ms:u64) -> Result<(),String> {
+        self.check()?;
+        let delay=Duration::from_millis(ms);
+        if delay>=self.deadline.saturating_duration_since(Instant::now()) {return Err(self.limit());}
+        std::thread::sleep(delay); self.check()
+    }
+}
+fn fetch(observation: &Observation, url: &str) -> Result<Response, String> { fetch_with(observation,url,false) }
+/// Page redirects stay visible; compressed responses are inspected by headers only.
+fn fetch_with(observation: &Observation, url: &str, compressed: bool) -> Result<Response, String> {
+    observation.check()?;
+    if observation.requests.get()>=4096 {return Err(observation.limit());}
+    observation.requests.set(observation.requests.get()+1);
+    let remaining=observation.deadline.saturating_duration_since(Instant::now());
+    observation.runtime.block_on(async {
+        tokio::time::timeout(remaining,async {
+            let request=observation.client.get(url);
+            let request=if compressed {request.header("accept-encoding","gzip, br")} else {request};
+            let mut response=request.send().await.map_err(|_|format!("{url}: HTTP observation failed or exceeded its 30 second request deadline"))?;
+            let status=response.status().as_u16();
+            let headers=response.headers().iter().map(|(k,v)|(k.as_str().to_string(),String::from_utf8_lossy(v.as_bytes()).into_owned())).collect();
+            if response.content_length().is_some_and(|length|length>MAX_RESPONSE_BYTES as u64) {return Err("HTTP observation exceeds its 8 MiB response limit".into());}
+            let mut bytes=Vec::new();
+            while let Some(chunk)=response.chunk().await.map_err(|_|"HTTP observation body failed")? {
+                observation.account(chunk.len())?;
+                if bytes.len().saturating_add(chunk.len())>MAX_RESPONSE_BYTES {return Err("HTTP observation exceeds its 8 MiB response limit".into());}
+                bytes.extend_from_slice(&chunk);
+            }
+            Ok(Response{status,headers,body:String::from_utf8_lossy(&bytes).into_owned()})
+        }).await.map_err(|_|observation.limit())?
     })
 }
-
-/// Follows redirects by hand, for files that are only a means here: the sitemap itself.
-fn fetch_following(runtime: &tokio::runtime::Runtime, client: &reqwest::Client, url: &str) -> Result<Response, String> {
-    let mut current = url.to_string();
+/// Sitemap redirects may stay on their original HTTP(S) origin, never switch credentials or targets.
+fn fetch_following(observation:&Observation,url:&str)->Result<Response,String> {
+    let initial=reqwest::Url::parse(url).map_err(|_|"invalid sitemap URL")?;
+    if !matches!(initial.scheme(),"http"|"https") || !initial.username().is_empty() || initial.password().is_some() || initial.fragment().is_some() {return Err("invalid sitemap URL".into());}
+    let mut current=initial.clone();
     for _ in 0..5 {
-        let response = fetch(runtime, client, &current)?;
-        let Some(next) = values(&response, "location").first().map(|l| l.to_string()).filter(|_| (300..400).contains(&response.status)) else { return Ok(response) };
-        let base = reqwest::Url::parse(&current).map_err(|e| format!("{current}: {e}"))?;
-        current = base.join(&next).map_err(|e| format!("{current}: {e}"))?.to_string();
+        let response=fetch(observation,current.as_str())?;
+        let Some(next)=values(&response,"location").first().map(|v|v.to_string()).filter(|_|(300..400).contains(&response.status)) else {return Ok(response)};
+        current=current.join(&next).map_err(|_|"invalid sitemap redirect")?;
+        if current.origin()!=initial.origin() || !current.username().is_empty() || current.password().is_some() || current.fragment().is_some() {return Err("sitemap redirect must stay on its original origin without credentials or fragments".into());}
     }
-    Err(format!("{url}: too many redirects"))
+    Err("sitemap observation exceeded five redirects".into())
 }
-
-fn sitemap_paths(runtime: &tokio::runtime::Runtime, client: &reqwest::Client, origin: &str) -> Result<Vec<String>, String> {
-    let index = fetch_following(runtime, client, &format!("{origin}/sitemap.xml"))?;
-    if index.status != 200 {
-        return Err(format!("{origin}/sitemap.xml answers {}; name the pages with --path", index.status));
-    }
-    let mut urls = Vec::new();
+fn sitemap_paths(observation:&Observation,origin:&str)->Result<Vec<String>,String> {
+    let index=fetch_following(observation,&format!("{origin}/sitemap.xml"))?;
+    if index.status!=200 {return Err(format!("{origin}/sitemap.xml answers {}; name the pages with --path",index.status));}
+    let mut urls=Vec::new();let mut children=0;
     for loc in locs(&index.body) {
+        observation.check()?;
         if loc.ends_with(".xml") {
-            let nested = fetch_following(runtime, client, &loc)?;
+            children+=1;
+            if children>128 {return Err("live audit incomplete: sitemap index exceeds 128 children".into());}
+            if path_of(origin,&loc).is_none() {return Err("sitemap child must stay under the audited origin/base".into());}
+            let nested=fetch_following(observation,&loc)?;
+            if nested.status!=200 {return Err("sitemap child did not return HTTP 200".into());}
+            if nested.body.contains("<sitemapindex") {return Err("live audit supports one sitemap index level; name pages with --path".into());}
             urls.extend(locs(&nested.body));
-        } else {
-            urls.push(loc);
-        }
+        } else {urls.push(loc);}
+        if urls.len()>100000 {return Err("live audit incomplete: sitemap inventory exceeds 100000 URLs; audit explicit --path batches".into());}
     }
-    Ok(urls.iter().filter_map(|u| path_of(origin, u)).map(str::to_string).collect())
+    Ok(urls.iter().filter_map(|u|path_of(origin,u)).map(str::to_string).collect())
 }
 
 pub fn run(root: Option<&Path>, args: &[String]) -> (i32, String) {
     let json = args.iter().any(|a| a == "--json");
     let fail = |code: i32, message: String| (code, if json { Json::obj([("ok", Json::Bool(false)), ("error", Json::str(message.as_str()))]).stringify() } else { message });
     let Some(origin) = flag(args, "--url").map(|u| u.trim_end_matches('/').to_string()) else { return fail(2, USAGE.into()) };
-    if !(origin.starts_with("http://") || origin.starts_with("https://")) {
-        return fail(2, format!("--url must start with http:// or https://\n{USAGE}"));
+    if !reqwest::Url::parse(&origin).is_ok_and(|url| matches!(url.scheme(), "http" | "https") && url.host_str().is_some() && url.username().is_empty() && url.password().is_none() && url.query().is_none() && url.fragment().is_none()) {
+        return fail(2, format!("--url must be an HTTP(S) origin or app base without credentials, query or fragment\n{USAGE}"));
     }
+    let sub = args.first().filter(|arg| !arg.starts_with('-')).map(String::as_str).unwrap_or("audit");
+    if !matches!(sub,"audit"|"preview") { return fail(2,USAGE.into()); }
     let number = |name: &str, default: u64| flag(args, name).map_or(Ok(default), |v| v.parse::<u64>().map_err(|_| format!("{name} must be a number")));
     let (sample, delay) = match (number("--sample", 30), number("--delay-ms", 2000)) {
         (Ok(sample), Ok(delay)) => (sample as usize, delay),
@@ -478,64 +553,101 @@ pub fn run(root: Option<&Path>, args: &[String]) -> (i32, String) {
     };
     let mut cfg = root.and_then(|r| brain_seo::Config::load(r).ok()).unwrap_or_default();
     let expect_noindex = args.iter().any(|a| a == "--expect-noindex") || cfg.staging;
-    let Ok(runtime) = tokio::runtime::Builder::new_current_thread().enable_all().build() else { return fail(2, "could not start the HTTP client".into()) };
-    let Ok(client) = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(30)).user_agent(concat!("brain-seo-audit/", env!("CARGO_PKG_VERSION"))).build() else {
-        return fail(2, "could not start the HTTP client".into());
-    };
+    if sample>1000 || delay>10000 {return fail(2,"live audit accepts --sample 0..1000 and --delay-ms 0..10000; zero samples means all pages up to the 1000-page cap".into());}
+    let observation=match Observation::new() {Ok(value)=>value,Err(error)=>return fail(2,error)};
+    if sub == "preview" {
+        if args.iter().any(|arg| ["--path", "--sample", "--delay-ms"].iter().any(|name| arg == name || arg.starts_with(&format!("{name}=")))) {
+            return fail(2, "live preview accepts one positional route; use seo audit for --path, --sample or --delay-ms".into());
+        }
+        let mut route = None;
+        let mut index = 1;
+        while index < args.len() {
+            let arg = &args[index];
+            if arg == "--url" { index += 2; continue; }
+            if arg.starts_with("--url=") || matches!(arg.as_str(), "--json" | "--expect-noindex") { index += 1; continue; }
+            if arg.starts_with('-') || route.replace(arg.as_str()).is_some() { return fail(2, USAGE.into()); }
+            index += 1;
+        }
+        let route = route.unwrap_or("/");
+        if !route.starts_with('/') || route.starts_with("//") || route.len()>4096 || route.contains(['#','\\']) || route.chars().any(char::is_control) {
+            return fail(2,"preview requires an app-relative route beginning with one slash, without a fragment or control characters".into());
+        }
+        let target = format!("{origin}{route}");
+        let response = match fetch(&observation,&target) { Ok(response)=>response,Err(error)=>return fail(2,error) };
+        if response.status!=200 { return fail(1,format!("live preview requires HTTP 200; observed HTTP {}. Resolve the response or explicitly preview its redirect target",response.status)); }
+        if !values(&response,"content-type").iter().any(|value| matches!(value.split(';').next().unwrap_or("").trim().to_ascii_lowercase().as_str(),"text/html"|"application/xhtml+xml")) {
+            return fail(2,"live preview requires an HTML response".into());
+        }
+        let mut preview=brain_seo::preview::preview(&brain_seo::html::parse(&response.body),&target,None);
+        let (code,audit,text)=report(&origin,&mut cfg,true,expect_noindex,vec![(target,response)],None,Probes::default());
+        if let Json::Obj(fields)=&mut preview.json {
+            if let Some(Json::Arr(pages))=audit.get("audit").and_then(|value|value.get("pages")) {
+                if let Some(score)=pages.first().and_then(|page|page.get("score")) {
+                    if let Some((_,value))=fields.iter_mut().find(|(key,_)|key=="score") { *value=score.clone(); }
+                }
+            }
+            fields.push(("scope".into(),Json::str("one anonymous HTTP response; not browser execution or search-engine rendering")));
+            fields.push(("httpStatus".into(),Json::Num(200.0)));
+            fields.push(("audit".into(),audit));
+        }
+        return (code,if json {preview.json.stringify()} else {format!("{}\nObserved live HTTP response (one URL, no browser execution)\n{text}",preview.text)});
+    }
     let named: Vec<String> = args.iter().enumerate().filter(|(i, _)| *i > 0 && args[i - 1] == "--path").map(|(_, a)| a.clone()).chain(args.iter().filter_map(|a| a.strip_prefix("--path=").map(str::to_string))).collect();
     let listed = named.is_empty();
     let paths = if named.is_empty() {
-        match sitemap_paths(&runtime, &client, &origin) {
+        match sitemap_paths(&observation, &origin) {
             Ok(all) => spread(&all, sample),
             Err(e) => return fail(2, e),
         }
     } else {
         named
     };
+    if paths.len()>1000 || paths.iter().any(|path| !path.starts_with('/') || path.starts_with("//") || path.len()>4096 || path.contains(['#','\\']) || path.chars().any(char::is_control)) {return fail(2,"live audit requires up to 1000 app-relative paths without fragments or control characters; use smaller --path batches".into());}
     let mut pages = Vec::new();
     for (i, path) in paths.iter().enumerate() {
         if i > 0 {
-            std::thread::sleep(Duration::from_millis(delay));
+            if let Err(error)=observation.pause(delay) {return fail(2,error);}
         }
         let url = format!("{origin}{path}");
-        match fetch(&runtime, &client, &url) {
+        match fetch(&observation, &url) {
             Ok(response) => pages.push((url, response)),
             Err(e) => return fail(2, e),
         }
     }
-    std::thread::sleep(Duration::from_millis(delay));
+    if let Err(error)=observation.pause(delay) {return fail(2,error);}
     let probe = paths.iter().rfind(|p| p.trim_matches('/').contains('/')).or(paths.first()).map(|p| format!("{origin}{}-brain-missing-page", p.trim_end_matches('/')));
-    let missing = probe.and_then(|url| fetch(&runtime, &client, &url).ok().map(|r| (url, r)));
+    let missing = probe.and_then(|url| fetch(&observation, &url).ok().map(|r| (url, r)));
     let mut probes = Probes { listed, ..Probes::default() };
-    let pause = || std::thread::sleep(Duration::from_millis(delay));
-    pause();
-    probes.robots = fetch(&runtime, &client, &format!("{origin}/robots.txt")).ok().filter(|r| r.status == 200).map(|r| r.body);
+    let pause = || observation.pause(delay);
+    if let Err(error)=pause() {return fail(2,error);}
+    probes.robots = fetch(&observation, &format!("{origin}/robots.txt")).ok().filter(|r| r.status == 200).map(|r| r.body);
     // one page stands for the rest: a handful of extra requests, each after the same pause
     let answered = || pages.iter().filter(|(_, r)| r.status == 200);
     let sample_page = answered().find(|(u, _)| path_of(&origin, u).is_some_and(|p| p != "/")).or_else(|| answered().next());
     if let Some((clean, _)) = sample_page {
         let path = path_of(&origin, clean).unwrap_or("/");
         for url in variant_urls(&origin, path) {
-            pause();
-            if let Ok(response) = fetch(&runtime, &client, &url) {
+            if let Err(error)=pause() {return fail(2,error);}
+            if let Ok(response) = fetch(&observation, &url) {
                 probes.variants.push((clean.clone(), url, response));
             }
         }
     }
     if let Some((url, first)) = answered().find_map(|(u, r)| cdn_status(r).filter(|s| cacheable(r) && cdn_skipped(s)).map(|s| (u.clone(), s))) {
-        pause();
-        if let Ok(response) = fetch(&runtime, &client, &url) {
+        if let Err(error)=pause() {return fail(2,error);}
+        if let Ok(response) = fetch(&observation, &url) {
             probes.second = Some((url, first, response));
         }
     }
     if let Some((_, first)) = answered().next() {
         for url in text_assets(&origin, &first.body) {
-            pause();
-            if let Ok(response) = fetch_with(&runtime, &client, &url, true) {
+            if let Err(error)=pause() {return fail(2,error);}
+            if let Ok(response) = fetch_with(&observation, &url, true) {
                 probes.assets.push((url, response));
             }
         }
     }
+    if let Err(error)=observation.check() {return fail(2,error);}
     let (code, value, text) = report(&origin, &mut cfg, true, expect_noindex, pages, missing, probes);
     (code, if json { value.stringify() } else { text })
 }
@@ -563,6 +675,20 @@ mod tests {
     }
     const CANON: &str = "<html><head><link rel=\"canonical\" href=\"https://example.test/a\"></head></html>";
 
+    #[test]
+    fn global_observation_budget_is_shared_sticky_and_cannot_sleep_past_deadline() {
+        let mut observation=Observation::new().unwrap();
+        observation.deadline=Instant::now()+Duration::from_millis(20);
+        assert!(observation.pause(50).is_err());
+        assert!(observation.check().is_err());
+        let observation=Observation::new().unwrap();
+        observation.account(128*1024*1024).unwrap();
+        assert!(observation.account(1).is_err());
+        assert!(observation.check().is_err());
+        let observation=Observation::new().unwrap();
+        observation.requests.set(4096);
+        assert!(fetch(&observation,"http://127.0.0.1:1").err().unwrap().contains("shared"));
+    }
     #[test]
     fn a_listed_url_that_redirects_is_reported_and_not_called_an_error_page() {
         let redirect = (format!("{ORIGIN}/old"), answer(301, &[("location", "/new")], ""));
@@ -650,11 +776,10 @@ mod tests {
                 let _ = stream.write_all(answer.as_bytes());
             }
         });
-        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-        let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
+        let observation=Observation::new().unwrap();
         let base = format!("http://127.0.0.1:{port}");
-        assert_eq!(fetch(&runtime, &client, &format!("{base}/old")).unwrap().status, 301);
-        assert_eq!(fetch_following(&runtime, &client, &format!("{base}/old")).unwrap().status, 200);
+        assert_eq!(fetch(&observation, &format!("{base}/old")).unwrap().status, 301);
+        assert_eq!(fetch_following(&observation, &format!("{base}/old")).unwrap().status, 200);
     }
 
     #[test]
@@ -706,8 +831,25 @@ mod tests {
     #[test]
     fn spread_covers_the_whole_list_and_locs_reads_a_sitemap() {
         let all: Vec<String> = (0..10).map(|i| format!("/{i}")).collect();
-        assert_eq!(spread(&all, 3), ["/0", "/3", "/6"]);
+        assert_eq!(spread(&all, 3), ["/0", "/1", "/2"]);
         assert_eq!(spread(&all, 50).len(), 10);
         assert_eq!(locs("<urlset><url><loc>https://a.test/x?a=1&amp;b=2</loc></url></urlset>"), ["https://a.test/x?a=1&b=2"]);
     }
+    #[test]
+    fn sample_represents_small_families_and_is_order_independent() {
+        let mut paths: Vec<String> = (0..100).map(|i| format!("/articles/item-{i:03}")).collect();
+        paths.extend(["/", "/about", "/teams/alpha", "/teams/alpha/contact"].map(str::to_string));
+        let chosen = spread(&paths, 8);
+        for rare in ["/", "/about", "/teams/alpha", "/teams/alpha/contact"] {
+            assert!(chosen.iter().any(|p| p == rare), "{rare}: {chosen:?}");
+        }
+        assert_eq!(chosen.iter().collect::<BTreeSet<_>>().len(), 8);
+        paths.reverse();
+        paths.push("/".into());
+        assert_eq!(spread(&paths, 8), chosen);
+        assert_eq!(spread(&paths, 0).len(), 104);
+        assert_eq!(spread(&paths, 1), ["/"]);
+        assert!(spread(&[], 2).is_empty());
+    }
+
 }

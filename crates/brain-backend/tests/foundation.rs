@@ -110,7 +110,7 @@ async fn postgres_migrations_search_scope_session_serialization_and_storage_outb
             .fetch_one(&pool)
             .await
             .unwrap(),
-        27
+        30
     );
     assert_eq!(
         sqlx::query_as::<_, (i32, String)>(
@@ -146,7 +146,10 @@ async fn postgres_migrations_search_scope_session_serialization_and_storage_outb
             (24, "session_controls".into()),
             (25, "per_owner".into()),
             (26, "identity_providers".into()),
-            (27, "provider_profile".into())
+            (27, "provider_profile".into()),
+            (28, "apple_native_audience".into()),
+            (29, "computed_backfills".into()),
+            (30, "native_vitals".into())
         ]
     );
     assert_eq!(
@@ -382,13 +385,13 @@ async fn provider_profile_migration_backfills_names_from_the_previous_schema() {
     let before: String = sqlx::query_scalar("SELECT xmin::text FROM public._brain_users WHERE id=$1")
         .bind(untouched).fetch_one(&pool).await.unwrap();
     // Reconstruct only the previous profile schema in this test-owned database. Published migration bytes stay intact.
-    sqlx::raw_sql("ALTER TABLE public._brain_users DROP COLUMN display_name, DROP COLUMN picture_url; DELETE FROM public._brain_migrations WHERE version=27")
+    sqlx::raw_sql("ALTER TABLE public._brain_users DROP COLUMN display_name, DROP COLUMN picture_url; ALTER TABLE public._brain_auth_challenges DROP CONSTRAINT _brain_auth_challenges_audience_check, DROP COLUMN audience; DROP TABLE public._brain_vitals_daily, public._brain_vitals_capacity, public._brain_data_backfills, public._brain_backfill_identity; DELETE FROM public._brain_migrations WHERE version IN (27,28,29,30)")
         .execute(&pool).await.unwrap();
     let preview = db::migration_plan(&pool).await.unwrap();
     assert_eq!(preview["installed"], 26);
-    assert_eq!(preview["target"], 27);
-    assert_eq!(preview["pending"], serde_json::json!([{"version":27,"name":"provider_profile"}]));
-    assert_eq!(preview["rollbackAfterApply"]["minimumKnownMigration"], 27);
+    assert_eq!(preview["target"], 30);
+    assert_eq!(preview["pending"], serde_json::json!([{"version":27,"name":"provider_profile"},{"version":28,"name":"apple_native_audience"},{"version":29,"name":"computed_backfills"},{"version":30,"name":"native_vitals"}]));
+    assert_eq!(preview["rollbackAfterApply"]["minimumKnownMigration"], 30);
     assert_eq!(preview["rollbackAfterApply"]["schemaDowngradeSupported"], false);
     let still_absent: bool = sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='_brain_users' AND column_name='display_name')").fetch_one(&pool).await.unwrap();
     assert!(still_absent, "preview must not execute the pending migration");
@@ -396,7 +399,7 @@ async fn provider_profile_migration_backfills_names_from_the_previous_schema() {
     db::migrate(&pool, &[]).await.unwrap();
     db::verify(&pool, &[]).await.unwrap();
     let after = db::migration_plan(&pool).await.unwrap();
-    assert_eq!(after["installed"], 27);
+    assert_eq!(after["installed"], 30);
     assert_eq!(after["pending"], serde_json::json!([]));
     let hints: (Option<String>, Option<String>) = sqlx::query_as("SELECT display_name,picture_url FROM public._brain_users WHERE id=$1")
         .bind(id).fetch_one(&pool).await.unwrap();

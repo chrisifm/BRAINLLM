@@ -44,6 +44,9 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("per_owner", include_str!("../migrations/0025_per_owner.sql")),
     ("identity_providers", include_str!("../migrations/0026_identity_providers.sql")),
     ("provider_profile", include_str!("../migrations/0027_provider_profile.sql")),
+    ("apple_native_audience", include_str!("../migrations/0028_apple_native_audience.sql")),
+    ("computed_backfills", include_str!("../migrations/0029_computed_backfills.sql")),
+    ("native_vitals", include_str!("../migrations/0030_native_vitals.sql")),
 ];
 fn checksum(sql: &str) -> String {
     Sha256::digest(sql.as_bytes())
@@ -843,7 +846,7 @@ async fn migrate_reviewed(pool: &PgPool, resources: &[Resource], approved: &[Str
                     continue;
                 }
                 return Err(format!(
-                    "BDB_SCHEMA_DRIFT (B0787): resource {} contract changed; no rows were removed; fix: review it with `brain backend approve-contract`",
+                    "BDB_SCHEMA_DRIFT (B0787): resource {} contract changed; even optional additions require explicit approval; no rows were removed; fix: review it with `brain backend approve-contract`, then use `--apply` for the reviewed change",
                     r.name
                 ));
             }

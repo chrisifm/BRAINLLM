@@ -19,12 +19,14 @@ pub mod tools;
 pub mod webmcp;
 pub mod worker;
 mod quality;
+mod performance_advice;
 pub mod doctor;
 pub mod origins;
 pub mod types;
 mod infer;
 mod route_headers;
 mod design_system;
+mod lazy_eager;
 mod baseline_data;
 pub mod browser_compat;
 pub mod env;
@@ -483,6 +485,8 @@ pub fn check(c: &Component, ctx: &Ctx) -> Vec<Diag> {
     d.extend(infer::check(c, ctx));
     d.extend(infer::check_route_headers(c, ctx));
     d.extend(design_system::check(c,ctx));
+    d.extend(lazy_eager::check(c,ctx));
+    d.extend(performance_advice::check(c,ctx));
     d.extend(browser_compat::check(c, ctx));
     // B0721: keys read here but missing from .brain_env; the diagnostic and its edit belong to .brain_env.
     if let Some(env) = &ctx.env {

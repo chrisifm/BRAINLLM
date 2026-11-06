@@ -53,6 +53,8 @@ pub fn run(root: &Path, args: &[String]) -> (i32, String) {
     if let Some(origin) = &url {
         steps.push(command("deploy", root, &["deploy", "check", "--url", origin]));
         steps.push(command("seo-live", root, &["seo", "--url", origin]));
+        let edge_origin = reqwest::Url::parse(origin).map(|url| url.origin().ascii_serialization()).unwrap_or_else(|_| origin.clone());
+        steps.push(command("edge", root, &["edge", "check", "--url", &edge_origin]));
     }
     let ok = steps.iter().all(|step| step.ok);
     let text = if json {

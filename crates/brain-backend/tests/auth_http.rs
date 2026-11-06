@@ -160,7 +160,8 @@ async fn real_http_account_handlers_enforce_identity_replay_revocation_custom_ro
     )
     .unwrap();
     let incoming=serde_json::from_value(json!({"name":"incoming_work","fields":{"message":{"kind":"str","required":true}},"policy":{"read":["admin"],"create":["admin"],"update":["admin"],"delete":["admin"]}})).unwrap();
-    let config = brain_backend::Config { api_keys: None,
+    let config = brain_backend::Config { vitals: None,
+        api_keys: None,
         resources: vec![],
         jobs: vec![incoming],
         uploads: files.clone(),
@@ -174,7 +175,7 @@ async fn real_http_account_handlers_enforce_identity_replay_revocation_custom_ro
             )
             .unwrap(),
         ),
-        google: None, apple: None, linkedin: None,
+        google: None, apple: None, apple_native: None, linkedin: None,
         gcs: None,
         roles: roles.clone(),
         mail: None,
@@ -810,14 +811,15 @@ async fn all_native_mutations_enforce_before_hooks_policy_validation_deadlines_a
         release: tokio::sync::Notify::new(),
     });
     let files = std::env::temp_dir().join(format!("brain-before-http-{}", Uuid::new_v4().simple()));
-    let config = |executor| brain_backend::Config { api_keys: None,
+    let config = |executor| brain_backend::Config { vitals: None,
+        api_keys: None,
         resources: vec![resource.clone()],
         jobs: vec![job.clone()],
         uploads: files.clone(),
         origins: vec!["https://app.example.test".into()],
         production: true,
         jwt: None,
-        google: None, apple: None, linkedin: None,
+        google: None, apple: None, apple_native: None, linkedin: None,
         gcs: None,
         roles: Default::default(),
         mail: None,
@@ -1048,14 +1050,15 @@ async fn exact_typed_resources_report_field_errors_unique_conflicts_and_timestam
     let files = std::env::temp_dir().join(format!("brain-typed-http-{}", Uuid::new_v4().simple()));
     let router = brain_backend::http::router(
         pool.clone(),
-        brain_backend::Config { api_keys: None,
+        brain_backend::Config { vitals: None,
+        api_keys: None,
             resources: vec![resource],
             jobs: vec![],
             uploads: files.clone(),
             origins: vec!["https://app.example.test".into()],
             production: true,
             jwt: None,
-            google: None, apple: None, linkedin: None,
+            google: None, apple: None, apple_native: None, linkedin: None,
             gcs: None,
             roles: Default::default(),
             mail: None,

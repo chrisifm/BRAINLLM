@@ -18,9 +18,19 @@ pub struct Route {
 /// Resolves `url_path` with the build's single route table (`brain_pack::routes`: same order, `[...rest]`
 /// catch-all, `views/404.brain` as `*`), so dev and dist always pick the same view.
 pub fn resolve(root: &Path, url_path: &str) -> Option<Route> {
+    resolve_checked(root,url_path).ok().flatten()
+}
+
+pub fn resolve_checked(root:&Path,url_path:&str)->Result<Option<Route>,String> {
+    resolve_request_checked(root,url_path,url_path)
+}
+
+pub fn resolve_request(root:&Path,decoded:&str,raw:&str)->Option<Route> {resolve_request_checked(root,decoded,raw).ok().flatten()}
+fn resolve_request_checked(root:&Path,decoded:&str,raw:&str)->Result<Option<Route>,String> {
     let table = brain_pack::routes::discover(root);
-    let (def, params) = brain_pack::routes::resolve(&table, url_path)?;
-    Some(Route { view: def.view.clone(), layouts: def.layouts.clone(), params, not_found: def.path == "*" })
+    let constraints=brain_pack::routes::constraints(root,&table)?;
+    let Some((def, params)) = brain_pack::routes::resolve_request(&table, &constraints, decoded,raw) else {return Ok(None);};
+    Ok(Some(Route { view: def.view.clone(), layouts: def.layouts.clone(), params, not_found: def.path == "*" }))
 }
 
 #[cfg(test)]

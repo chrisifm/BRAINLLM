@@ -363,7 +363,7 @@ pub fn record_build(root: &Path, build: &Value) -> Result<Value> {
         .as_str()
         .filter(|s| s.len() <= 128 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
         .map(str::to_string);
-    let value = json!({"schemaVersion":1,"producer":PRODUCER,"kind":"verified-build-summary","buildSignature":signature,"metrics":metrics,"stages":stages,"facts":facts,"totalFacts":count,"omittedFacts":count.saturating_sub(MAX_ITEMS),"factsTruncated":truncated||count>MAX_ITEMS,"omittedReports":build["optimizations"].as_array().map(|a|a.len().saturating_sub(256)).unwrap_or(0),"qualification":"Reported emitted-byte totals sum pages and may repeat shared assets; not measured network, CPU or heap. Original source locations are retained only when their supplied revision matches a guarded current source read."});
+    let value = json!({"schemaVersion":1,"producer":PRODUCER,"kind":"verified-build-summary","buildSignature":signature,"metrics":metrics,"stages":stages,"facts":facts,"totalFacts":count,"omittedFacts":count.saturating_sub(MAX_ITEMS),"factsTruncated":truncated||count>MAX_ITEMS,"omittedReports":build["optimizations"].as_array().map(|a|a.len().saturating_sub(256)).unwrap_or(0),"routeFacts":crate::quality_views::build_routes(build),"qualification":"Reported emitted-byte totals sum pages and may repeat shared assets; not measured network, CPU or heap. Original source locations are retained only when their supplied revision matches a guarded current source read."});
     cas(&path, &encode(&value)?, &revision(&path)?)?;
     Ok(
         json!({"stored":true,"path":".brain/quality/build.json","facts":facts.len(),"omittedFacts":count.saturating_sub(MAX_ITEMS)}),
@@ -460,7 +460,7 @@ pub fn refresh(root: &Path) -> Result<Value> {
                     // Only rules with local evidence; no invented cross-file import/type/config resolution.
                     if !(diagnostic.code.starts_with("B09")
                         || diagnostic.code.starts_with("B10")
-                        || matches!(diagnostic.code, "B0201" | "B2002" | "B2004" | "B2201"))
+                        || matches!(diagnostic.code, "B0201" | "B0202" | "B0221" | "B0401" | "B0413" | "B0501" | "B1301" | "B1303" | "B1305" | "B1310" | "B1311" | "B1312" | "B1313" | "B2002" | "B2004" | "B2201"))
                     {
                         continue;
                     }
@@ -563,6 +563,7 @@ pub fn refresh(root: &Path) -> Result<Value> {
                         "factsTruncated",
                         "omittedReports",
                         "qualification",
+                        "routeFacts",
                     ]
                     .contains(&k.as_str())
                 })
@@ -570,6 +571,7 @@ pub fn refresh(root: &Path) -> Result<Value> {
             || build["metrics"].as_object().is_none_or(|o| {
                 o.len() > 32 || o.iter().any(|(k, v)| !safe_text(k, 64) || !v.is_u64())
             })
+            || build.get("routeFacts").is_some_and(|value| !crate::quality_views::valid_build_routes(value))
             || !brain_check::scan_secrets(&build.to_string()).is_empty()
         {
             return Err(
@@ -635,6 +637,7 @@ pub fn refresh(root: &Path) -> Result<Value> {
         .map(|i| i["occurrences"].as_u64().unwrap_or(1) as usize)
         .sum();
     let mut snapshot = json!({"schemaVersion":1,"producer":PRODUCER,"frameworkVersion":env!("CARGO_PKG_VERSION"),"inputFingerprint":index["inputFingerprint"],"sourceRevisions":index["sourceRevisions"],"coverage":{"manifest":index["coverage"],"locallyCheckedFiles":checked,"locallyReadBytes":source_bytes,"skippedLocalFiles":skipped,"completeAudit":false,"crossFileSemanticContext":"not-loaded","runtimeMeasurements":"not-run","allBugs":"unknown"},"score":Value::Null,"items":items,"totalFindings":total,"omittedFindings":total.saturating_sub(represented),"truncated":total>represented||skipped>0,"design":{"available":design.is_some(),"baselinePresent":design.as_ref().map(|d|d["baselinePresent"].clone())},"history":{"available":history.is_some(),"counts":history.as_ref().map(|h|h["counts"].clone())},"build":build,"artifacts":{}});
+    snapshot["perViews"] = crate::quality_views::project(&documents, snapshot["items"].as_array().map(Vec::as_slice).unwrap_or(&[]));
     let (markdown, panel) = render(&snapshot);
     snapshot["artifacts"] = json!({"IMPROVEMENTS.md":crate::manifests::hash(markdown.as_bytes()),"panel.html":crate::manifests::hash(panel.as_bytes())});
     let json = String::from_utf8(encode(&snapshot)?).map_err(|_| "quality JSON encoding failed")?;

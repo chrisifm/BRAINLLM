@@ -40,6 +40,7 @@ fn resources() -> Vec<brain_backend::Resource> {
 /// One backend process: its own router, broker and limiter memory over the shared database.
 async fn process(pool: &sqlx::PgPool, shared: bool) -> (String, http::SocketControl) {
     let config = brain_backend::Config {
+        vitals: None,
         api_keys: None,
         roles: Default::default(),
         mail: None,
@@ -53,7 +54,7 @@ async fn process(pool: &sqlx::PgPool, shared: bool) -> (String, http::SocketCont
         origins: vec![ORIGIN.into()],
         production: true,
         jwt: None,
-        google: None, apple: None, linkedin: None,
+        google: None, apple: None, apple_native: None, linkedin: None,
         gcs: None,
     };
     let quote = Route::from_contract("quote", &json!({"method": "GET", "path": "/quotes", "auth": "public", "rate": "3/min"}), &|_: &str| None).unwrap();

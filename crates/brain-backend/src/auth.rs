@@ -380,6 +380,18 @@ impl Auth {
     }
     /// One-use nonce for an identity provider's browser sign-in, bounded per provider; the plaintext is never stored.
     pub async fn identity_challenge(&self, provider: Provider) -> Result<String, String> {
+        self.identity_challenge_bound(provider, provider.nonce(), None).await
+    }
+    /// Native Apple challenges have their own realm and a persisted, server-allowed audience.
+    pub(crate) async fn apple_native_challenge(&self, audience: &str) -> Result<String, String> {
+        self.identity_challenge_bound(Provider::Apple, "apple_native_nonce", Some(audience)).await
+    }
+    pub(crate) async fn apple_native_audience(&self, nonce: &str) -> Result<Option<String>, String> {
+        if !crate::jwt::valid_opaque(nonce) { return Ok(None) }
+        sqlx::query_scalar("SELECT audience FROM _brain_auth_challenges WHERE token_hash=$1 AND purpose='apple_native_nonce' AND provider='apple' AND audience IS NOT NULL AND expires_at>now() AND consumed_at IS NULL")
+            .bind(digest(nonce)).fetch_optional(&self.pool).await.map_err(crate::db::safe)
+    }
+    async fn identity_challenge_bound(&self, provider: Provider, purpose: &str, audience: Option<&str>) -> Result<String, String> {
         let nonce = crate::jwt::opaque();
         let mut tx = self.pool.begin().await.map_err(crate::db::safe)?;
         sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
@@ -387,12 +399,12 @@ impl Auth {
             .execute(&mut *tx)
             .await
             .map_err(crate::db::safe)?;
-        sqlx::query("DELETE FROM _brain_auth_challenges WHERE token_hash IN (SELECT token_hash FROM _brain_auth_challenges WHERE purpose=$1 AND expires_at<=now() ORDER BY expires_at LIMIT 100)").bind(provider.nonce()).execute(&mut *tx).await.map_err(crate::db::safe)?;
-        let retained:i64=sqlx::query_scalar("SELECT count(*)::bigint FROM (SELECT 1 FROM _brain_auth_challenges WHERE purpose=$1 LIMIT 10000) retained").bind(provider.nonce()).fetch_one(&mut *tx).await.map_err(crate::db::safe)?;
+        sqlx::query("DELETE FROM _brain_auth_challenges WHERE token_hash IN (SELECT token_hash FROM _brain_auth_challenges WHERE purpose=$1 AND expires_at<=now() ORDER BY expires_at LIMIT 100)").bind(purpose).execute(&mut *tx).await.map_err(crate::db::safe)?;
+        let retained:i64=sqlx::query_scalar("SELECT count(*)::bigint FROM (SELECT 1 FROM _brain_auth_challenges WHERE purpose=$1 LIMIT 10000) retained").bind(purpose).fetch_one(&mut *tx).await.map_err(crate::db::safe)?;
         if retained >= 10000 {
             return Err("Identity challenge budget reached; retry shortly".into());
         }
-        sqlx::query("INSERT INTO _brain_auth_challenges(token_hash,purpose,provider,expires_at) VALUES ($1,$2,$3,now()+interval '5 minutes')").bind(digest(&nonce)).bind(provider.nonce()).bind(provider.name()).execute(&mut *tx).await.map_err(crate::db::safe)?;
+        sqlx::query("INSERT INTO _brain_auth_challenges(token_hash,purpose,provider,audience,expires_at) VALUES ($1,$2,$3,$4,now()+interval '5 minutes')").bind(digest(&nonce)).bind(purpose).bind(provider.name()).bind(audience).execute(&mut *tx).await.map_err(crate::db::safe)?;
         tx.commit().await.map_err(crate::db::safe)?;
         Ok(nonce)
     }
@@ -413,11 +425,17 @@ impl Auth {
         identity: &crate::oidc::Identity,
         nonce: &str,
     ) -> Result<Option<(User, String)>, String> {
+        self.identity_login_bound(provider, identity, nonce, provider.nonce(), None).await
+    }
+    pub(crate) async fn apple_native_login(&self, identity: &crate::oidc::Identity, nonce: &str, audience: &str) -> Result<Option<(User, String)>, String> {
+        self.identity_login_bound(Provider::Apple, identity, nonce, "apple_native_nonce", Some(audience)).await
+    }
+    async fn identity_login_bound(&self, provider: Provider, identity: &crate::oidc::Identity, nonce: &str, purpose: &str, audience: Option<&str>) -> Result<Option<(User, String)>, String> {
         if !crate::jwt::valid_opaque(nonce) {
             return Ok(None);
         }
         let mut tx = self.pool.begin().await.map_err(crate::db::safe)?;
-        let consumed=sqlx::query("UPDATE _brain_auth_challenges SET consumed_at=now() WHERE token_hash=$1 AND purpose=$2 AND provider=$3 AND expires_at>now() AND consumed_at IS NULL").bind(digest(nonce)).bind(provider.nonce()).bind(provider.name()).execute(&mut *tx).await.map_err(crate::db::safe)?.rows_affected();
+        let consumed=sqlx::query("UPDATE _brain_auth_challenges SET consumed_at=now() WHERE token_hash=$1 AND purpose=$2 AND provider=$3 AND audience IS NOT DISTINCT FROM $4 AND expires_at>now() AND consumed_at IS NULL").bind(digest(nonce)).bind(purpose).bind(provider.name()).bind(audience).execute(&mut *tx).await.map_err(crate::db::safe)?.rows_affected();
         if consumed != 1 {
             return Ok(None);
         }

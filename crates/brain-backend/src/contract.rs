@@ -891,7 +891,9 @@ fn native_paths(roles: &crate::auth_flows::RolesConfig) -> Map<String, Value> {
         if let Some(request) = request {
             operation["requestBody"] = request
         }
-        if matches!(method, "post" | "put" | "patch" | "delete") {
+        if matches!(method, "post" | "put" | "patch" | "delete") && !matches!(path,
+            "/_brain/auth/apple/notifications" | "/_brain/auth/apple/native/challenge" |
+            "/_brain/auth/apple/native/token" | "/_brain/auth/apple/native/refresh") {
             operation["parameters"] = json!([{"name":"Origin","in":"header","required":true,"description":"Exact configured site origin; browsers supply this automatically","schema":{"type":"string","format":"uri"}}])
         }
         paths.entry(path.to_string()).or_insert_with(|| json!({}))[method] = operation;
@@ -1049,7 +1051,7 @@ fn native_paths(roles: &crate::auth_flows::RolesConfig) -> Map<String, Value> {
         "Verify an Apple JS ID token and nonce; link an existing account only for a verified non-relay email; the unsigned first-authorization name is a display hint",
         json!([{"appleNonce":[]}]),
         200,
-        Some(tokens),
+        Some(tokens.clone()),
         Some(body(object(
             json!({"id_token":{"type":"string","maxLength":16384,"writeOnly":true},"name":{"type":"string","maxLength":200}}),
             &["id_token"],
@@ -1066,6 +1068,32 @@ fn native_paths(roles: &crate::auth_flows::RolesConfig) -> Map<String, Value> {
         Some(object(json!({"ok":{"const":true}}), &["ok"], true)),
         Some(body(object(json!({"payload":{"type":"string","maxLength":16384}}), &["payload"], true))),
         &[400, 413, 415, 422, 429, 500, 503, 504],
+    );
+    add(
+        "/_brain/auth/apple/native/challenge", "post",
+        "One-use native Apple nonce bound to an explicitly configured bundle ID; Cookie and Origin are forbidden",
+        open.clone(), 200,
+        Some(object(json!({"client_id":{"type":"string"},"nonce":{"type":"string","pattern":"^[a-f0-9]{64}$"},"expires_in":{"const":300}}), &["client_id","nonce","expires_in"], true)),
+        Some(body(object(json!({"client_id":{"type":"string","minLength":3,"maxLength":255}}), &["client_id"], true))),
+        &[400,401,403,413,415,422,429,500,503,504],
+    );
+    let mut native_tokens = tokens;
+    native_tokens["properties"]["refresh_token"] = json!({"type":"string","writeOnly":false});
+    native_tokens["properties"]["refresh_expires_in"] = json!({"type":"integer","minimum":0});
+    native_tokens["required"].as_array_mut().unwrap().extend([json!("refresh_token"),json!("refresh_expires_in")]);
+    add(
+        "/_brain/auth/apple/native/token", "post",
+        "Verify native Apple signature, exact bound audience and one-use nonce; explicit rotating token JSON, never cookies",
+        open.clone(), 200, Some(native_tokens.clone()),
+        Some(body(object(json!({"id_token":{"type":"string","maxLength":16384,"writeOnly":true},"nonce":{"type":"string","maxLength":128,"writeOnly":true},"name":{"type":"string","maxLength":200}}), &["id_token","nonce"], true))),
+        &[400,401,403,413,415,422,429,500,503,504],
+    );
+    add(
+        "/_brain/auth/apple/native/refresh", "post",
+        "Rotate an explicit native refresh token; Cookie and Origin are forbidden and no cookies are set",
+        open.clone(), 200, Some(native_tokens),
+        Some(body(object(json!({"refresh_token":{"type":"string","writeOnly":true}}), &["refresh_token"], true))),
+        &[400,401,403,413,415,422,429,500,503,504],
     );
     add(
         "/_brain/auth/linkedin/start",

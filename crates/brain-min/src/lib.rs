@@ -72,6 +72,19 @@ pub fn minify_module(src: &str, prod: bool) -> Result<String, String> {
 /// Production cleanup feedback refers to this JavaScript input, never an inferred
 /// original .brain line. Mangling is not counted as a binding removal.
 pub fn minify_module_with_report(src: &str, prod: bool) -> Result<Minified, CleanupError> {
+    let (out, report) = module_tokens(src, prod)?;
+    Ok(Minified { code: print::print(&out), report })
+}
+
+/// Private error artifacts can map retained/transformed token anchors to this generated JavaScript input.
+/// This does not infer original BrainScript locations or include source contents.
+pub fn minify_module_with_positions(src: &str, prod: bool) -> Result<(Minified, Vec<(usize, usize)>), CleanupError> {
+    let (out, report) = module_tokens(src, prod)?;
+    let (code, positions) = print::print_with_positions(&out);
+    Ok((Minified { code, report }, positions))
+}
+
+fn module_tokens(src: &str, prod: bool) -> Result<(Vec<lex::Tok>, CleanupReport), CleanupError> {
     let (map, keep) = (runtime_map(), runtime_keep());
     let mut toks = checked_tokens(src)?;
     let mut report = CleanupReport::default();
@@ -95,7 +108,7 @@ pub fn minify_module_with_report(src: &str, prod: bool) -> Result<Minified, Clea
                 "Run brain check and inspect the generated input; no source snippet was logged",
             )
         })?;
-    Ok(Minified { code: print::print(&out), report })
+    Ok((out, report))
 }
 fn checked_tokens(src: &str) -> Result<Vec<lex::Tok>, CleanupError> {
     if src.len() > 8 * 1024 * 1024 {

@@ -43,7 +43,45 @@ pub use sockets::{SocketConfig, SocketControl};
 #[path = "http_api_keys.rs"]
 mod http_api_keys;
 
-tokio::task_local! { static REQUEST_ID: String; static REQUEST_OPERATION: (String, Option<String>); }
+tokio::task_local! {
+    static REQUEST_ID: String;
+    static REQUEST_OPERATION: (String, Option<String>);
+    // 0: no evidence, 1: undeclared stored role, 2: a denial already consumed this evidence.
+    static ROLE_DIAGNOSTIC: std::cell::Cell<u8>;
+}
+
+/// Evidence only: unknown roles can still hold public/owner grants. Never changes authentication or policy.
+fn identify_role(role: &str, roles: &[String]) {
+    if !crate::api_keys::system_active() && !roles.iter().any(|known| known == role) {
+        let _ = ROLE_DIAGNOSTIC.try_with(|state| { if state.get() == 0 { state.set(1); } });
+    }
+}
+fn take_undeclared_role() -> bool {
+    ROLE_DIAGNOSTIC.try_with(|state| {
+        if state.get() == 1 { state.set(2); true } else { false }
+    }).unwrap_or(false)
+}
+/// One process-wide finite window, independent of the number of users or attacker-controlled role values.
+struct RoleDiagnosticLimit { start: std::time::Instant, used: u8 }
+impl RoleDiagnosticLimit {
+    fn reserve(&mut self, now: std::time::Instant) -> bool {
+        if now.duration_since(self.start) >= Duration::from_secs(60) { self.start = now; self.used = 0; }
+        if self.used >= 8 { return false; }
+        self.used += 1;
+        true
+    }
+}
+fn undeclared_role_event() -> Value {
+    json!({"schemaVersion":1,"event":"backend-policy-denied","code":"POLICY_DENIED","reason":"undeclared-auth-role","rid":request_reference(),"private":true,"valuesCaptured":false,"fix":"Run brain doctor with the app's configured database and reconcile stored user roles with server/auth/roles.jsbrain; use an account the declared policy permits"})
+}
+fn note_undeclared_role() {
+    if !take_undeclared_role() { return; }
+    static LIMIT: std::sync::OnceLock<std::sync::Mutex<RoleDiagnosticLimit>> = std::sync::OnceLock::new();
+    let now = std::time::Instant::now();
+    let limit = LIMIT.get_or_init(|| std::sync::Mutex::new(RoleDiagnosticLimit { start: now, used: 0 }));
+    let reserved = limit.lock().unwrap_or_else(|error| error.into_inner()).reserve(now);
+    if reserved { db::diagnostic(&undeclared_role_event()); }
+}
 /// The route template and the resource it addresses: finite identifiers, never request values.
 pub(crate) fn request_operation() -> Option<(String, Option<String>)> {
     REQUEST_OPERATION.try_with(Clone::clone).ok()
@@ -75,6 +113,8 @@ fn first_unsymbolized_stack() -> bool {
 }
 
 pub struct Config {
+    /// None keeps the independent document-performance collector disabled.
+    pub vitals: Option<crate::vitals::Config>,
     pub resources: Vec<Resource>,
     pub jobs: Vec<Resource>,
     pub uploads: PathBuf,
@@ -84,6 +124,7 @@ pub struct Config {
     pub jwt: Option<crate::jwt::Config>,
     pub google: Option<crate::google::Config>,
     pub apple: Option<crate::apple::Config>,
+    pub apple_native: Option<crate::apple_native::Config>,
     pub linkedin: Option<crate::linkedin::Config>,
     pub gcs: Option<crate::media::GcsConfig>,
     pub roles: crate::auth_flows::RolesConfig,
@@ -104,6 +145,7 @@ pub struct App {
     jwt: Option<crate::jwt::Jwt>,
     google: Option<crate::google::Google>,
     apple: Option<crate::apple::Apple>,
+    apple_native: Option<crate::apple_native::AppleNative>,
     linkedin: Option<crate::linkedin::LinkedIn>,
     auth_flows: crate::auth_flows::Flows,
     webhooks: Option<crate::webhooks::Webhooks>,
@@ -123,6 +165,8 @@ pub struct App {
     cluster: crate::cluster::Cluster,
     organizations: Arc<crate::organizations::Organizations>,
     captcha: Arc<crate::captcha::Captcha>,
+    vitals: Option<crate::vitals::Config>,
+    vitals_lifecycle: EdgeControl,
 }
 #[derive(Debug)]
 pub struct Error {
@@ -275,6 +319,7 @@ impl Error {
 }
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
+        if self.code == "POLICY_DENIED" { note_undeclared_role(); }
         let rejected: Vec<String> = match &self.fields {
             Some(Value::Object(fields)) if self.status == StatusCode::UNPROCESSABLE_ENTITY => fields.keys().filter(|k| loggable_field(k)).take(8).cloned().collect(),
             _ => Vec::new(),
@@ -423,6 +468,7 @@ impl App {
     async fn user(&self, h: &HeaderMap) -> Result<Option<User>> {
         let user = self.identify(h).await?;
         if let Some(user) = &user {
+            identify_role(&user.role, &self.auth_flows.roles().roles);
             crate::audit::identified(user.id);
         }
         Ok(user)
@@ -629,6 +675,10 @@ pub async fn router_full(
     if apple.is_some() && jwt.is_none() {
         return Err("Apple sign-in requires configured JWT sessions".into());
     }
+    let apple_native = config.apple_native.map(crate::apple_native::AppleNative::new).transpose()?;
+    if apple_native.is_some() && jwt.is_none() {
+        return Err("Native Apple sign-in requires configured JWT sessions".into());
+    }
     let linkedin = config.linkedin.map(crate::linkedin::LinkedIn::new).transpose()?;
     if linkedin.is_some() && jwt.is_none() {
         return Err("LinkedIn sign-in requires configured JWT sessions".into());
@@ -713,6 +763,7 @@ pub async fn router_full(
         jwt,
         google,
         apple,
+        apple_native,
         linkedin,
         queue: Queue::new(pool.clone()),
         pool,
@@ -724,6 +775,8 @@ pub async fn router_full(
         origins: Arc::new(config.origins),
         domain: Arc::new(domain),
         api_keys,
+        vitals: config.vitals,
+        vitals_lifecycle: edge_control.clone(),
     };
     // Production answers exactly the listed origins; development also the loopback ports `origins::allows` admits.
     let allow_origin = if app.production {
@@ -789,6 +842,9 @@ pub async fn router_full(
         .route("/_brain/auth/apple/challenge", post(apple_challenge))
         .route("/_brain/auth/apple", post(apple_login))
         .route("/_brain/auth/apple/notifications", post(apple_notifications))
+        .route("/_brain/auth/apple/native/challenge", post(apple_native_challenge))
+        .route("/_brain/auth/apple/native/token", post(apple_native_login))
+        .route("/_brain/auth/apple/native/refresh", post(apple_native_refresh))
         .route("/_brain/auth/linkedin/start", get(linkedin_start))
         .route("/_brain/auth/linkedin/callback", get(linkedin_callback))
         .route(
@@ -831,6 +887,7 @@ pub async fn router_full(
             post(analytics_ingest).layer(DefaultBodyLimit::max(crate::analytics::MAX_BODY)),
         )
         .route("/_brain/analytics.js", get(analytics_script))
+        .route("/_brain/vitals", post(vitals_ingest).layer(DefaultBodyLimit::max(crate::vitals::MAX_BODY)))
         .route("/_brain/jobs/{queue}", post(enqueue))
         .route("/_brain/jobs/status/{id}", get(job_status))
         .merge(domain_http::routes())
@@ -1038,6 +1095,12 @@ pub async fn serve_full(
     result
 }
 async fn request_deadline(State(custom): State<Arc<routes_http::State>>, req: Request, next: Next) -> Response {
+    if req.uri().path() == "/_brain/vitals" {
+        return match tokio::time::timeout(Duration::from_secs(5),next.run(req)).await {
+            Ok(response) => response,
+            Err(_) => Error::new(StatusCode::SERVICE_UNAVAILABLE,"VITALS_UNAVAILABLE","The document-performance request exceeded its deadline; do not retry this batch").into_response(),
+        };
+    }
     if let Some(budget) = routes_http::matched(&req).and_then(|m| custom.deadline(m)) {
         return match tokio::time::timeout(budget, next.run(req)).await {
             Ok(response) => response,
@@ -1088,7 +1151,7 @@ async fn response_headers(req: Request, next: Next) -> Response {
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
     let db_time = std::sync::Arc::new(db::DbTime::default());
-    let response = db::with_db_time(db_time.clone(), REQUEST_ID.scope(rid.clone(), REQUEST_OPERATION.scope(operation_of(&method, &route, &path), crate::audit::scope(next.run(req))))).await;
+    let response = db::with_db_time(db_time.clone(), REQUEST_ID.scope(rid.clone(), REQUEST_OPERATION.scope(operation_of(&method, &route, &path), ROLE_DIAGNOSTIC.scope(std::cell::Cell::new(0), crate::audit::scope(next.run(req)))))).await;
     crate::dev_trace::request(&rid, method.as_str(), &route, response.status().as_u16(), started.elapsed().as_secs_f64() * 1000.0);
     let log_policy = response.extensions().get::<edge_http::LogPolicy>().copied();
     let error_code = response.extensions().get::<ErrorCode>().map(|code| code.0);
@@ -1193,7 +1256,12 @@ async fn protect(State(app): State<App>, req: Request, next: Next) -> Response {
     // A presented API key on /api is a non-ambient credential; the key gate verifies or rejects it.
     let keyed = http_api_keys::keyed_resource_request(&req);
     let signed_route = routes_http::matched(&req).is_some_and(|m| app.routes.signed(req.method(), m));
-    if !signed_inbound && !signed_route && !keyed && !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS) {
+    // Native identity endpoints have no ambient cookie authority and never set browser cookies.
+    // An Origin or Cookie header is rejected by the handler, not promoted to native authority.
+    let native_identity = req.method() == Method::POST
+        && matches!(req.uri().path(), "/_brain/auth/apple/native/challenge" | "/_brain/auth/apple/native/token" | "/_brain/auth/apple/native/refresh")
+        && !req.headers().contains_key(header::ORIGIN) && !req.headers().contains_key(header::COOKIE);
+    if !native_identity && !signed_inbound && !signed_route && !keyed && !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS) {
         let origin = req
             .headers()
             .get(header::ORIGIN)
@@ -1522,6 +1590,42 @@ async fn apple_login(
         .ok_or_else(auth_denied)?
         .with_name(body.name.as_deref());
     identity_session(&app, auth::Provider::Apple, &identity, nonce, "__Host-brain-apple").await
+}
+fn native_identity_headers(headers: &HeaderMap) -> Result<()> {
+    if headers.contains_key(header::COOKIE) || headers.contains_key(header::ORIGIN) {
+        return Err(Error::new(StatusCode::FORBIDDEN, "NATIVE_AUTH_HEADERS", "Native sign-in accepts no browser Origin or Cookie headers; use the browser sign-in flow for web sessions"));
+    }
+    Ok(())
+}
+fn native_identity_response(body: Value) -> Response {
+    let mut response = Json(body).into_response();
+    response.headers_mut().insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+    response.headers_mut().insert(header::PRAGMA, "no-cache".parse().unwrap());
+    response
+}
+async fn apple_native_challenge(State(app): State<App>, headers: HeaderMap, Strict(body): Strict<crate::apple_native::ChallengeRequest>) -> Result<Response> {
+    native_identity_headers(&headers)?;
+    let native = app.apple_native.as_ref().ok_or_else(auth_disabled)?;
+    let challenge = native.challenge(&app.auth, &body.client_id).await.map_err(|error| Error::internal(error))?.ok_or_else(auth_denied)?;
+    Ok(native_identity_response(serde_json::to_value(challenge).map_err(|_| Error::internal("Cannot encode native identity challenge"))?))
+}
+async fn apple_native_login(State(app): State<App>, headers: HeaderMap, Strict(body): Strict<crate::apple_native::Credential>) -> Result<Response> {
+    native_identity_headers(&headers)?;
+    let native = app.apple_native.as_ref().ok_or_else(auth_disabled)?;
+    let jwt = app.jwt.as_ref().ok_or_else(auth_disabled)?;
+    let (user, opaque) = native.login(&app.auth, &body).await.map_err(|_| identity_unavailable())?.ok_or_else(auth_denied)?;
+    let tokens = jwt.issue(user, &opaque).await.map_err(|error| Error::internal(error))?;
+    Ok(native_identity_response(crate::apple_native::token_body(tokens)))
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NativeIdentityRefresh { refresh_token: String }
+async fn apple_native_refresh(State(app): State<App>, headers: HeaderMap, Strict(body): Strict<NativeIdentityRefresh>) -> Result<Response> {
+    native_identity_headers(&headers)?;
+    app.apple_native.as_ref().ok_or_else(auth_disabled)?;
+    let jwt = app.jwt.as_ref().ok_or_else(auth_disabled)?;
+    let tokens = jwt.refresh(Some(&body.refresh_token)).await.map_err(|error| Error::internal(error))?.ok_or_else(auth_denied)?;
+    Ok(native_identity_response(crate::apple_native::token_body(tokens)))
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -2493,6 +2597,31 @@ pub async fn wait_shutdown() {
     }
 }
 
+// This collector has no session, API-key, visitor or behavior-analytics authority.
+async fn vitals_ingest(State(app): State<App>, headers: HeaderMap, uri: axum::http::Uri, body: std::result::Result<Bytes, axum::extract::rejection::BytesRejection>) -> Result<Response> {
+    let Some(config) = app.vitals.as_ref() else { return Err(Error::missing()) };
+    let privacy = |name:&str| headers.get_all(name).iter().any(|value| value.to_str().is_ok_and(|value| value.split(',').any(|part|part.trim()=="1")));
+    if privacy("dnt") || privacy("sec-gpc") {
+        return Ok(StatusCode::NO_CONTENT.into_response());
+    }
+    if uri.query().is_some() || !headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).is_some_and(|v| v.split(';').next().is_some_and(|part| part.trim().eq_ignore_ascii_case("application/json"))) {
+        return Err(Error::new(StatusCode::BAD_REQUEST, "VITALS_INVALID", "Send application/json without a query string"));
+    }
+    let body = body.map_err(|_| Error::new(StatusCode::PAYLOAD_TOO_LARGE, "VITALS_TOO_LARGE", "Send at most 4 KiB per document-performance batch"))?;
+    let batch = serde_json::from_slice(&body).map_err(|_| Error::new(StatusCode::BAD_REQUEST, "VITALS_INVALID", "Send {route,consent:true,metrics:[{name,value}]} with only declared route patterns and metrics"))?;
+    let result = tokio::select! {
+        result = crate::vitals::ingest(&app.pool, config, batch) => result,
+        _ = async { while !app.vitals_lifecycle.draining() { tokio::time::sleep(Duration::from_millis(25)).await; } } => Err(crate::vitals::Error::Unavailable),
+    };
+    match result {
+        Ok(()) => Ok(StatusCode::NO_CONTENT.into_response()),
+        Err(crate::vitals::Error::Invalid) => Err(Error::new(StatusCode::BAD_REQUEST, "VITALS_INVALID", "Send literal consent:true, a declared public route pattern and at most five unique bounded numeric metrics")),
+        Err(crate::vitals::Error::RateLimited) => Err(Error::new(StatusCode::TOO_MANY_REQUESTS, "VITALS_RATE_LIMITED", "The anonymous shared minute budget is exhausted; do not retry this batch")),
+        Err(crate::vitals::Error::Capacity) => Err(Error::new(StatusCode::SERVICE_UNAVAILABLE, "VITALS_CAPACITY", "The aggregate row capacity is exhausted; inspect retention and declared route patterns")),
+        Err(crate::vitals::Error::Unavailable) => Err(Error::new(StatusCode::SERVICE_UNAVAILABLE, "VITALS_UNAVAILABLE", "The document-performance collector is unavailable; do not retry this batch")),
+    }
+}
+
 // First-party behavior analytics (docs/backend/analytics.md). Accepts `text/plain` beacons; answers 204 even when a
 // privacy signal or bot heuristic drops the batch, so the browser learns nothing about filtering.
 async fn analytics_ingest(State(app): State<App>, headers: HeaderMap, body: Bytes) -> Result<Response> {
@@ -2939,5 +3068,170 @@ mod stack_note_tests {
     fn the_note_about_a_binary_without_symbols_is_kept_once_per_process() {
         assert!(super::first_unsymbolized_stack());
         assert!(!super::first_unsymbolized_stack());
+    }
+}
+
+#[cfg(test)]
+mod role_diagnostic_tests {
+    use super::*;
+    fn roles() -> Vec<String> { ["admin", "user"].map(String::from).to_vec() }
+    #[tokio::test]
+    async fn undeclared_roles_only_add_private_evidence_and_keep_owner_grants() {
+        let policy = crate::contract::Policy { create: vec!["user".into()], update: vec!["owner".into()], ..Default::default() };
+        for role in ["admin", "user", "retired_role"] {
+            ROLE_DIAGNOSTIC.scope(std::cell::Cell::new(0), async {
+                identify_role(role, &roles());
+                assert_eq!(take_undeclared_role(), role == "retired_role");
+                assert!(!take_undeclared_role(), "at most once per request");
+                identify_role(role, &roles());
+                assert!(!take_undeclared_role(), "repeated authentication cannot replenish evidence");
+                assert!(policy.allows("update", Some(role), true), "owner grant stays available for {role}");
+                assert_eq!(policy.allows("create", Some(role), false), role == "user");
+            }).await;
+        }
+        assert!(!take_undeclared_role(), "no cross-request evidence");
+    }
+    #[tokio::test]
+    async fn regular_keys_keep_role_evidence_while_system_keys_keep_their_bypass() {
+        let user = User { id: Uuid::nil(), email: "reader@example.test".into(), role: "retired_role".into(), verified: true, name: None, picture: None };
+        http_api_keys::KEY_USER.scope(user.clone(), ROLE_DIAGNOSTIC.scope(std::cell::Cell::new(0), async {
+            let key_user = http_api_keys::key_user().unwrap();
+            identify_role(&key_user.role, &roles());
+            assert!(take_undeclared_role());
+        })).await;
+        crate::api_keys::as_system(http_api_keys::KEY_USER.scope(user, ROLE_DIAGNOSTIC.scope(std::cell::Cell::new(0), async {
+            let key_user = http_api_keys::key_user().unwrap();
+            identify_role(&key_user.role, &roles());
+            assert!(!take_undeclared_role());
+            assert!(crate::contract::Policy::default().allows("create", Some(&key_user.role), false));
+        }))).await;
+    }
+    #[test]
+    fn role_diagnostic_volume_is_bounded_without_per_identity_state() {
+        let now = std::time::Instant::now();
+        let mut limit = RoleDiagnosticLimit { start: now, used: 0 };
+        for _ in 0..8 { assert!(limit.reserve(now)); }
+        for _ in 0..1000 { assert!(!limit.reserve(now + Duration::from_secs(59))); }
+        assert!(limit.reserve(now + Duration::from_secs(60)));
+        assert_eq!(limit.used, 1);
+    }
+    #[tokio::test]
+    async fn policy_denial_response_never_exposes_private_role_evidence() {
+        ROLE_DIAGNOSTIC.scope(std::cell::Cell::new(0), async {
+            identify_role("retired_role", &roles());
+            let response = Error::forbidden().into_response();
+            assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            assert!(!take_undeclared_role(), "emitted only when a policy denial becomes a response");
+            let bytes = axum::body::to_bytes(response.into_body(), 4096).await.unwrap();
+            let body: Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(body["error"]["code"], "POLICY_DENIED");
+            let text = String::from_utf8_lossy(&bytes);
+            assert!(!text.contains("retired_role") && !text.contains("undeclared-auth-role"));
+            let event = undeclared_role_event();
+            assert_eq!(event["reason"], "undeclared-auth-role");
+            assert_eq!(event["private"], true);
+            assert_eq!(event["valuesCaptured"], false);
+            assert!(event.get("role").is_none() && event.get("user").is_none() && event.get("token").is_none());
+        }).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "Run only against an explicitly owned disposable Postgres cluster"]
+    async fn real_http_role_denials_keep_client_shape_and_private_causes() {
+        // The diagnostic sink and volume limiter are process-wide; the fixture owns an isolated child.
+        const CHILD: &str = "BRAIN_TEST_ROLE_DIAGNOSTIC_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "http::role_diagnostic_tests::real_http_role_denials_keep_client_shape_and_private_causes", "--ignored", "--nocapture", "--test-threads=1"])
+                .env(CHILD, "1").stdin(std::process::Stdio::null()).spawn().unwrap();
+            let deadline = std::time::Instant::now() + Duration::from_secs(90);
+            loop {
+                if let Some(status) = child.try_wait().unwrap() { assert!(status.success(), "isolated HTTP fixture failed"); return; }
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill(); let _ = child.wait(); panic!("isolated HTTP fixture exceeded 90 seconds");
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        use tower::ServiceExt;
+        use crate::{api_keys::{Keys, NewKey}, auth_flows::RolesConfig};
+        let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Use an owned disposable Postgres cluster");
+        let pool = db::connect(&url).await.unwrap();
+        let resource: Resource = serde_json::from_value(json!({
+            "name":"diagnostic_notes", "fields":{"title":{"kind":"str"}},
+            "policy":{"read":["owner"],"create":["user","admin"],"update":["owner"],"delete":["owner"]}
+        })).unwrap();
+        db::migrate(&pool, std::slice::from_ref(&resource)).await.unwrap();
+        RolesConfig::default().register(&pool).await.unwrap();
+        let auth = Auth::new(pool.clone()).await.unwrap();
+        async fn account(auth: &Auth, pool: &PgPool, role: &str) -> (Uuid, String) {
+            let email = format!("role-{}@example.test", Uuid::new_v4().simple());
+            let password = "synthetic-role-diagnostic-password".to_string();
+            let user = auth.signup(Credentials { email: email.clone(), password: password.clone() }).await.unwrap();
+            sqlx::query("UPDATE _brain_users SET role=$1 WHERE id=$2").bind(role).bind(user.id).execute(pool).await.unwrap();
+            let (_, session) = auth.login(Credentials { email, password }).await.unwrap().unwrap();
+            (user.id, session)
+        }
+        let (user, session) = account(&auth, &pool, "user").await;
+        let (_, admin) = account(&auth, &pool, "admin").await;
+        let keys = Keys::new(pool.clone(), Default::default()).unwrap();
+        let new_key = || NewKey { name:"synthetic".into(),scopes:vec!["diagnostic_notes:*".into()],expires_in_days:None,daily_quota:None,monthly_quota:None };
+        let (_, key) = keys.create(user, new_key()).await.unwrap().unwrap();
+        let (_, system) = keys.create_system(user, new_key()).await.unwrap().unwrap();
+        let scratch = std::env::temp_dir().join(format!("brain-role-diagnostics-{}", Uuid::new_v4().simple()));
+        let diagnostics = scratch.join("private.jsonl");
+        db::keep_diagnostics(diagnostics.clone());
+        let config = Config {
+            vitals: None,
+            resources:vec![resource],jobs:vec![],uploads:scratch.join("uploads"),origins:vec!["https://app.example.test".into()],production:true,
+            jwt:None,google:None,apple:None,apple_native:None,linkedin:None,gcs:None,roles:Default::default(),mail:None,auth_public_base_url:None,webhooks:None,before_hooks:None,sockets:None,api_keys:Some(Default::default()),
+        };
+        let (router, sockets) = router_with_socket_control(pool.clone(), config).await.unwrap();
+        async fn call(router: &Router, method: &str, uri: &str, cookie: Option<&str>, key: Option<&str>) -> (StatusCode, Value) {
+            let mut request = axum::http::Request::builder().method(method).uri(uri)
+                .extension(axum::extract::ConnectInfo(SocketAddr::from(([127,0,0,1], 4567))))
+                .header("origin", "https://app.example.test").header("accept", "application/json").header("content-type", "application/json");
+            if let Some(cookie) = cookie { request = request.header("cookie", format!("__Host-brain={cookie}")); }
+            if let Some(key) = key { request = request.header("x-api-key", key); }
+            let body = if method == "POST" { Body::from(json!({"title":"Synthetic note"}).to_string()) } else { Body::empty() };
+            let response = router.clone().oneshot(request.body(body).unwrap()).await.unwrap();
+            let status = response.status();
+            let bytes = axum::body::to_bytes(response.into_body(), 65536).await.unwrap();
+            (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+        }
+        let resource_path = "/api/diagnostic_notes";
+        let created = call(&router, "POST", resource_path, Some(&session), None).await;
+        assert_eq!(created.0, StatusCode::OK, "{}", created.1);
+        let row = format!("{resource_path}/{}", created.1["id"].as_str().unwrap());
+        assert_eq!(call(&router, "POST", resource_path, Some(&admin), None).await.0, StatusCode::OK);
+        assert_eq!(call(&router, "POST", resource_path, None, Some(&key)).await.0, StatusCode::OK);
+        // A formerly provisioned role can remain in storage after its declaration was removed.
+        sqlx::query("INSERT INTO _brain_auth_roles(role) VALUES('retired_role')").execute(&pool).await.unwrap();
+        sqlx::query("UPDATE _brain_users SET role='retired_role' WHERE id=$1").bind(user).execute(&pool).await.unwrap();
+        assert_eq!(call(&router, "GET", &row, Some(&session), None).await.0, StatusCode::OK, "unknown stored roles retain owner grants");
+        for (cookie, key) in [(Some(session.as_str()), None), (None, Some(key.as_str()))] {
+            let denied = call(&router, "POST", resource_path, cookie, key).await;
+            assert_eq!(denied.0, StatusCode::FORBIDDEN);
+            assert_eq!(denied.1["error"]["code"], "POLICY_DENIED");
+            assert!(!denied.1.to_string().contains("retired_role") && !denied.1.to_string().contains("undeclared-auth-role"));
+            let private = std::fs::read_to_string(&diagnostics).expect("A policy denial with an undeclared stored role must write private diagnostics");
+            let events: Vec<Value> = private.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+            assert!(events.iter().any(|event| event["rid"] == denied.1["rid"] && event["reason"] == "undeclared-auth-role" && event["private"] == true));
+            assert!(!private.contains("retired_role") && !private.contains(&session));
+        }
+        let before = std::fs::read_to_string(&diagnostics).unwrap().lines().filter(|line| line.contains("undeclared-auth-role")).count();
+        assert_eq!(before, 2);
+        for _ in 0..12 { assert_eq!(call(&router, "POST", resource_path, Some(&session), None).await.0, StatusCode::FORBIDDEN); }
+        let capped = std::fs::read_to_string(&diagnostics).unwrap().lines().filter(|line| line.contains("undeclared-auth-role")).count();
+        assert_eq!(capped, 8, "the real request path respects the process-wide volume cap");
+        assert_eq!(call(&router, "POST", resource_path, None, Some(&system)).await.0, StatusCode::OK, "system bypass retains explicit scopes");
+        sqlx::query("UPDATE _brain_users SET role='user' WHERE id=$1").bind(user).execute(&pool).await.unwrap();
+        assert_eq!(call(&router, "POST", resource_path, Some(&session), None).await.0, StatusCode::OK);
+        let after = std::fs::read_to_string(&diagnostics).unwrap().lines().filter(|line| line.contains("undeclared-auth-role")).count();
+        assert_eq!(capped, after, "valid and system identities never add an unknown-role cause");
+        drop(router);
+        sockets.shutdown();
+        pool.close().await;
+        let _ = std::fs::remove_dir_all(scratch);
     }
 }

@@ -1,0 +1,27 @@
+{
+  "id": "google-basic-bridge",
+  "kind": "capability",
+  "title": "Explicit basic-mode Google event bridge",
+  "why": "One reviewed per-environment destination receives declared consented event names and funnels. Denied/revoked events are not replayed; legacy tags remain compatible unless explicitly opted in. Setup is local and read-only.",
+  "changelog": [
+    "Basic-mode Google bridge gates declared events on consent"
+  ],
+  "guide": "docs/GOOGLE-ANALYTICS.md",
+  "apis": [
+    "google.mode",
+    "brain google setup"
+  ],
+  "affects": [
+    "brain.json"
+  ],
+  "adopt": {
+    "file": "brain.json",
+    "snippet": "{\"google\":{\"mode\":\"basic\",\"banner\":true}}"
+  },
+  "uses": [
+    {
+      "glob": "brain.json",
+      "contains": "\"basic\""
+    }
+  ]
+}

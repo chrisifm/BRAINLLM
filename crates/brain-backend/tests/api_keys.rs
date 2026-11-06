@@ -35,6 +35,7 @@ fn resource(name: &str, policy: Policy) -> Resource {
 }
 fn config(resources: Vec<Resource>, api_keys: Option<brain_backend::api_keys::Config>) -> brain_backend::Config {
     brain_backend::Config {
+        vitals: None,
         api_keys,
         resources,
         jobs: vec![],
@@ -42,7 +43,7 @@ fn config(resources: Vec<Resource>, api_keys: Option<brain_backend::api_keys::Co
         origins: vec![ORIGIN.into()],
         production: false,
         jwt: None,
-        google: None, apple: None, linkedin: None,
+        google: None, apple: None, apple_native: None, linkedin: None,
         gcs: None,
         roles: Default::default(),
         mail: None,

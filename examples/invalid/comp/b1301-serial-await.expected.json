@@ -1,0 +1,12 @@
+[
+  {
+    "code": "B1301",
+    "file": "invalid/comp/b1301-serial-await.brain",
+    "line": 5,
+    "col": 5,
+    "msg": "This for-of awaits a call before advancing to its next iteration.",
+    "fix": "If iterations are independent and order is irrelevant, consider batching or bounded concurrency. Keep serial execution when calls share state, have ordering requirements or depend on prior results.",
+    "level": "warning",
+    "edits": []
+  }
+]

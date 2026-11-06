@@ -1,0 +1,11 @@
+<script>
+const rows = [1, 2]
+const pairs = () => {
+  for (const first of rows) {
+    for (const second of rows) {
+      log(first, second)
+    }
+  }
+}
+</script>
+<button type="button" on:click={pairs}>Review pairs</button>

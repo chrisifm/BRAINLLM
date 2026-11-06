@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0225",
+    "level": "warning",
+    "file": "invalid/comp/b0225-lazy-eager.brain",
+    "line": 3,
+    "col": 1,
+    "msg": "`<Card lazy>` also has an eager use in this file; its module stays in the eager JavaScript graph",
+    "fix": "keep every use of this component lazy to defer its JavaScript, or keep the eager use intentionally; lazy still delays this instance's mount and does not reduce the total route budget"
+  }
+]

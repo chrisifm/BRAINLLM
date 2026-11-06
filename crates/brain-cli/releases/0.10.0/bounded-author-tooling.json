@@ -1,0 +1,30 @@
+{
+  "id": "bounded-author-tooling",
+  "kind": "capability",
+  "title": "Bounded author and adoption observations",
+  "why": "Anonymous HTTP bench, source-metadata adoption audit, real local MCP handshake and diagnostic practice pagination expose observed evidence with strict bounds, without source execution or client configuration writes.",
+  "changelog": [
+    "Bounded author tools add bench, adopt audit, connect and practice inventory"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "apis": [
+    "brain bench",
+    "brain adopt --audit",
+    "brain connect",
+    "brain manifest practices"
+  ],
+  "affects": [
+    "package.json"
+  ],
+  "adopt": {
+    "file": "package.json",
+    "snippet": "{\"scripts\":{\"agent:probe\":\"brain connect --json\"}}",
+    "command": "brain connect --json"
+  },
+  "uses": [
+    {
+      "glob": "package.json",
+      "contains": "brain connect"
+    }
+  ]
+}

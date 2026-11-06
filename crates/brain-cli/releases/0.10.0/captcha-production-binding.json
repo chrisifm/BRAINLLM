@@ -1,0 +1,23 @@
+{
+  "id": "captcha-production-binding",
+  "kind": "fix",
+  "title": "Production CAPTCHA binding diagnostics",
+  "why": "Declared missing secrets are reported without values. Proven mounted/declared public test site-key bindings refuse production before database setup, respecting overwrites, scopes and incomplete discovery.",
+  "changelog": [
+    "CAPTCHA diagnostics distinguish proven production test bindings"
+  ],
+  "guide": "docs/backend/captcha.md",
+  "apis": [
+    "brain check",
+    "brain backend serve"
+  ],
+  "affects": [
+    "server/auth/captcha.jsbrain",
+    "views/**",
+    "comp/**",
+    ".brain_env"
+  ],
+  "codes": [
+    "B0790"
+  ]
+}

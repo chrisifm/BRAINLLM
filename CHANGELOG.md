@@ -9,7 +9,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
-## [0.9.2] - 2026-11-05
+## [0.10.0] - 2026-11-06
 
 Includes the typed input, server helper, discovery metadata, shutdown and migration preview fixes recorded under
 0.9.1. That source tag was withheld from npm after its repeated Linux source verification failed.
@@ -19,12 +19,53 @@ Includes the typed input, server helper, discovery metadata, shutdown and migrat
 - Native watcher rescan notifications trigger full cache recovery even without paths or a full mutation queue, preserving changes the operating system could not report individually.
 - Dev navigation fallbacks distinguish watcher overflow, server reconnection, redirects, response status, document mismatch and execution phase; caught exceptions reach the bounded existing browser-error relay without blocking recovery.
 
+### Added and fixed
+
+- Separate Apple native challenge/token/refresh endpoints. Native Apple challenge, token and refresh flows use a separate private audience list and one-use audience-bound nonces. Browser audiences remain unchanged.
+- Custom raw route verification runs before the application handler. Custom verification runs a declared bounded server handler before a raw public write, preserving exact bytes, declared headers, deadlines and fixed failures.
+- Read-only Postgres audit and anonymous HTTP conformity observations. The selected current database and role can be inspected read-only with bounded statements and proposals, without applying SQL, printing query values or changing cluster settings.
+- Edge plan/check/audit compares delivery with the build contract. Bounded anonymous delivery checks compare the build contract with observed headers. Explicit Cloudflare changes require a reviewed origin/build/revision-bound plan and preserve unrelated rules.
+- Optional Redis cache shares eligible public SSR entries. Public cached SSR can share bounded standalone RESP2 Redis entries with private runtime credentials, TTL, build/host/base isolation and safe miss degradation. DNS leases, headers and cleanup remain bounded.
+- Basic-mode Google bridge gates declared events on consent. One reviewed per-environment destination receives declared consented event names and funnels. Denied/revoked events are not replayed; legacy tags remain compatible unless explicitly opted in. Setup is local and read-only.
+- Opt-in startup data warmup prepares exact cached public SSR routes. A small exact public cached SSR working set can be read before readiness under one absolute module/data/cleanup deadline. Static output rejects the option; failures never continue behind a ready process.
+- Frontend route parameter constraints share raw-segment matching. Exact route parameter and redirect predicates share a deterministic ASCII grammar and preserve raw matching across dev/SSR/SSG/SEO. Unsupported host exports fail explicitly instead of widening rules.
+- Computed field backfills use reviewed resumable atomic batches. Deterministic declared field computation supports a read-only plan, exact approval binding, bounded atomic batches and checkpointed resume. Immutable migrations, row audit and original update timestamps are preserved.
+- Named aggregates support deduplicated list and compound groups. Named aggregates group over the complete policy-filtered row set using distinct list elements or up to four dimensions with at most one list. Scalar keys remain compatible; compound keys are objects.
+- Explicit systemOnly grants protect actions, transitions and operations. Actions, transitions and operations can require a verified operator-issued system key independently of roles. Roles named system, owner or admin do not acquire that authority and nested steps cannot broaden it.
+- Explicit page-level attribution reduces repeated chunk signatures. The default per-file attribution remains unchanged. An explicit page scope removes compiler-owned browser chunk comments before hashing and compression while preserving page/discovery credit and authored/license bytes.
+- Generic error pages use escaped locale-specific fallback copy. Four flat dictionary values customize generic fallback copy with locale/English fallback and a scoped stylesheet. Escaped content participates in the build signature; authored error pages and API responses retain precedence.
+- Optional native Sentry reporting keeps messages and private maps out of public output. Explicit consented browser error coordinates use owned deterministic debug IDs, private generated-JavaScript maps and a bounded Node HTTPS tunnel. No automatic artifact upload or static conversion occurs.
+- Native field-vitals aggregates are independent of behavior analytics. An explicit production Node/native collector stores daily declared-pattern/metric aggregates, not visitors or raw URLs. Shared quota, atomic capacity, lazy retention and read-only reports expose statistical limitations.
+- Bounded author tools add bench, adopt audit, connect and practice inventory. Anonymous HTTP bench, source-metadata adoption audit, real local MCP handshake and diagnostic practice pagination expose observed evidence with strict bounds, without source execution or client configuration writes.
+- Per-view quality recommendations reuse real build and save evidence. Existing quality/build/save engines project bounded dependency-aware findings and actual artifact bytes into per-view review actions. They do not judge screenshots, synthesize images/pages or infer browser speed.
+- Job input and unknown-role failures retain bounded private causes. Job backend input failures retain field and handler location metadata; undeclared authenticated roles produce a bounded fixed private cause without exposing identities. System-key audit attribution follows its immutable key record.
+- Doctor uses matched production inputs for budgets and static consistency. Artifact budgets, static consistency and signatures use the same isolated production inputs as build. A separate placeholder-only SEO assessment cannot silently inflate production bytes.
+- CAPTCHA diagnostics distinguish proven production test bindings. Declared missing secrets are reported without values. Proven mounted/declared public test site-key bindings refuse production before database setup, respecting overwrites, scopes and incomplete discovery.
+- Conservative performance warnings expose structural review opportunities. New native warnings report specific structural traversal, serial await, item-dependent declared GET and proven DOM layout patterns. Guidance is conditional and makes no purity, exact query-count, timing or safe-rewrite claim.
+- B0225 warns about mixed eager and lazy uses of the same component. B0225 warns when the same imported component is used both eagerly and lazily, with lexical scope awareness. It does not remove deferred bytes from the conservative route budget.
+- Lazy visibility recovery and custom vitals same-origin handling are hardened. A lazy visible import can resume correctly after hidden-document transitions and removes all owned listeners on completion/disposal. Custom vitals endpoints are pinned to the actual same origin even with a foreign base element.
+- Live SEO preview, sitemap diff and bounded family sampling improve review. Live preview inspects exactly one anonymous HTML response, while sitemap diff preserves missing-path verdicts. Live crawling uses shared time/request/byte bounds and explicit incomplete errors; title advice avoids substring-only job metadata false positives.
+- New theme scaffolds include print and forced-colors defaults. New themes retain browser forced-color semantics and add basic print layout rules without enabling global content-visibility or rewriting existing authored themes.
+- Operator MCP parity preserves CLI verdicts and bounded child ownership. New operator tools retain exact CLI reports and apply confirmation through owned current-app children. HTTP clients share four native DNS leases across MCP calls and bounded teardown; Sentry close also cancels admitted partial bodies.
+
+- Optional contract drift explains the explicit approval boundary: `safe:true` does not authorize automatic migration, and even added optional fields require a reviewed `approve-contract --apply`.
+
+- Per-use literal booleans prune inert static UI branches in already-inlined production components, preserving dynamic and owner-sensitive conditionals. One SVG fixture measured 377 to 310 gzip bytes for its component module; this is not a universal route saving.
+
 ### Tests
 
 - Navigation focus acceptance verifies both the heading and polite announcement within the original document for button and link navigation; an unexpected full reload fails immediately instead of retrying the action, with bounded reload reasons and server/browser failure context.
 - Browser acceptance and both benchmark launchers wait for a complete debugging port and live bounded discovery, including Chromium endpoints with or without a browser UUID, within their existing startup budgets.
 - TCP and Unix socket fixtures restore blocking mode after accepting from a nonblocking listener, preserving bounded request reads on platforms that inherit the listener's mode.
 - Backend CLI acceptance observes an active SQL-blocked request against an unresponsive owned database connection, then requires bounded SIGTERM exit, closed database connections, a released listener and a successful restart on the same port.
+
+### Upgrading
+
+- Upgrade the compiler and all generated npm pins together. Review `brain upgrade` and regenerate deployment previews before replacing native processes. Framework migrations 0028–0030 require a compatible binary; inspect the rollback boundary and backups before applying them. Older binaries must continue to refuse unknown applied migrations.
+- New performance and mixed eager/lazy advice starts as warnings with no automatic semantic rewrite. Optional WebMCP advice alone can be set to off/info/warning; security, confirmation and tool contracts retain their existing levels.
+- Redis, Google basic mode, startup data warmup, raw route constraints, Sentry and native document-performance aggregates are explicit opt-ins. Static builds remain portable and refuse options that require Node/native services. Existing authored themes are not rewritten.
+- Sentry needs a private runtime DSN and separately reviewed private artifact upload; it does not include a provider SDK or upload credentials. Native vitals stores declared-pattern aggregates and cannot establish exact p75, unique visitors or trusted samples. Both require explicit analytics consent for browser capture.
+- Large live crawls now fail explicitly at shared observation/inventory bounds. Split them into smaller `--path` batches instead of treating a truncated observation as a passing audit. A benchmark observation does not establish a cold/warm cache state.
 
 ## [0.9.1] - 2026-11-05
 
@@ -1430,8 +1471,8 @@ These checkout snapshots are not release-binary performance benchmarks.
 - First public npm release for seven native platforms (macOS arm64/x64, Linux x64/arm64/musl, Windows x64/arm64),
   the runtime and the `npm create @christianirack/brainllm` and `npm create @christianirack/brainll` initializers (#5).
 
-[Unreleased]: https://github.com/chrisifm/BRAINLLM/compare/v0.9.2...HEAD
-[0.9.2]: https://github.com/chrisifm/BRAINLLM/compare/v0.9.1...v0.9.2
+[Unreleased]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/chrisifm/BRAINLLM/compare/v0.9.0...v0.10.0
 [0.9.1]: https://github.com/chrisifm/BRAINLLM/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/chrisifm/BRAINLLM/compare/v0.8.12...v0.9.0
 [0.4.0]: https://github.com/chrisifm/BRAINLLM/compare/v0.3.1...v0.4.0

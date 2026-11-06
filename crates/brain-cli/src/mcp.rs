@@ -1278,13 +1278,54 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
     });
     tools.push(Tool {
         name: "brain_manifest",
-        description: "Read bounded private per-view/component contracts, revisions, dependency edges and structural UI states without executing source or reading secrets. Refresh updates only owned metadata.",
-        input_schema: schema([("target","string","optional source file"),("refresh","boolean","refresh bounded private manifests")], &[]),
+        description: "Read bounded private component contracts/revisions, or operation=practices for actual compiler diagnostic records with family/codePrefix/limit/cursor filters. No source executes; refresh updates only owned metadata.",
+        input_schema: schema([("target","string","optional source file"),("refresh","boolean","refresh bounded private manifests"),("operation","string","query or practices"),("request","object","practices family, codePrefix, limit and cursor")], &[]),
         output_schema: out([("schemaVersion","number")]),
         run: Box::new(|a| {
+            match arg(a,"operation").as_deref().unwrap_or("query") {
+                "practices" => {
+                    if a.get("refresh")==Some(&Json::Bool(true)) || a.get("target").is_some() {return Err("practices does not accept refresh or target".into());}
+                    let request=serde_json::from_str(&a.get("request").map(Json::stringify).unwrap_or_else(||"{}".into())).map_err(|_|"practices request must be JSON")?;
+                    return crate::practices::query(&request).map(|v|v.to_string());
+                },
+                "query" => (),
+                _ => return Err("manifest operation must be query or practices".into()),
+            }
             let root=crate::app_root()?;
             if matches!(a.get("refresh"),Some(Json::Bool(true))) {crate::manifests::refresh(&root).map(|v|v.to_string())}
             else {crate::manifests::query(&root,arg(a,"target").as_deref()).map(|v|v.to_string())}
+        }),
+    });
+    tools.push(Tool {
+        name: "brain_bench",
+        description: "Observe 1-20 anonymous sequential GETs at one HTTP(S) URL with bounded time/body, no query/credentials/redirect/retry. No browser or cold/warm inference.",
+        input_schema: schema([("url","string","one HTTP(S) URL without query, fragment or credentials"),("requests","number","whole request count 1-20, default 3")], &["url"]),
+        output_schema: out([("schemaVersion","number"),("ok","boolean"),("observations","array")]),
+        run: Box::new(|a| {
+            let mut args=vec!["--url".into(),need(a,"url")?];
+            if let Some(value)=a.get("requests") {args.extend(["--requests".into(),value.stringify()]);}
+            crate::tooling_bench::run(&args).map(|v|v.to_string())
+        }),
+    });
+    tools.push(Tool {
+        name: "brain_adopt",
+        description: "Read-only metadata inventory of this project's frontend. Requires audit:true. No source bodies/scripts execute; no files are written. File-name candidates do not prove behavioral parity.",
+        input_schema: schema([("audit","boolean","must be true to select read-only adoption audit")], &["audit"]),
+        output_schema: out([("schemaVersion","number"),("ok","boolean"),("sourceFiles","array")]),
+        run: Box::new(|a| {
+            if a.get("audit")!=Some(&Json::Bool(true)) {return Err("adopt requires audit:true; no mutation mode exists".into());}
+            crate::adoption_audit::inventory(&crate::app_root()?).map(|v|v.to_string())
+        }),
+    });
+    tools.push(Tool {
+        name: "brain_connect",
+        description: "Complete initialize with one owned minimal-profile local MCP child and return a private stdio configuration proposal. No tools are invoked, no client settings are written, and clientConnected stays false.",
+        input_schema: schema([], &[]),
+        output_schema: out([("schemaVersion","number"),("ok","boolean"),("clientConnected","boolean"),("configurationWritten","boolean")]),
+        run: Box::new(|_| {
+            let root=crate::app_root()?;
+            let exe=std::env::current_exe().map_err(|_|"cannot resolve current brain executable")?;
+            crate::tooling_connect::run(&root,&exe).map(|v|v.to_string())
         }),
     });
     tools.push(Tool {
@@ -1342,6 +1383,20 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
             crate::deployment::preview(&crate::app_root()?,&need(a,"target")?,&request).map(|v|v.to_string())
         }),
     });
+    for (name, description) in [
+        ("brain_db_audit", "Read-only current-app Postgres audit. request: environment (default development), limit1..200. No SQL/settings changes or query values."),
+        ("brain_backend_conform", "Bounded anonymous GET/HEAD JSON observations. request: explicit url origin, optional paths1..8. No writes, credentials, redirects or broad standards proof."),
+        ("brain_google_setup", "Read-only private-environment Google configuration checklist. request: optional environment. Does not create resources or contact a provider."),
+        ("brain_seo_diff", "Read-only built sitemap migration coverage. request: from app-relative sitemap file or explicit HTTP(S) sitemap. Compares inventory, not live indexing or content parity."),
+        ("brain_vitals_report", "Read-only native document-performance aggregates. request: environment, days1..90, limit1..500, offset0..10000. No exact p75 or unique visitors."),
+        ("brain_data_backfill", "Preview a declared current-app computed backfill. request: name, explicit environment, limit1..1000, includeNull. Applying additionally requires apply:true, confirm:true and reviewed app-relative request file; one atomic batch, no automatic retry."),
+        ("brain_edge", "Bounded edge plan/check/audit; explicit provider cloudflare uses private configured credentials. request: operation, provider, url, reviewed app-relative request file. Apply requires operation:apply, provider:cloudflare and confirm:true. No publish, broad account changes or automatic retry."),
+    ] {
+        tools.push(Tool {name,description,input_schema:schema([("request","object","Exact bounded command fields described above; no environment values or arbitrary argv")],&["request"]),output_schema:out([("schemaVersion","number"),("ok","boolean"),("exitCode","number"),("report","object")]),run:Box::new(move |a| {
+            let request=serde_json::from_str(&a.get("request").ok_or("request is required")?.stringify()).map_err(|_|"operator request must be JSON")?;
+            crate::operator_tools::run(&crate::app_root()?,name,&request).map(|value|value.to_string())
+        })});
+    }
     tools.push(Tool {
         name: "brain_edge_plan",
         description: "Read-only: what a CDN may keep of the last build, rule by rule. Changes nothing and configures no provider.",
@@ -1470,7 +1525,7 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
 /// Keep a stable six-tool minimal vocabulary; backend adds only its focused contract/generation tools.
 fn profile_tool(profile:&str,name:&str)->bool {
     matches!(name,"brain_spec"|"brain_check"|"brain_fix"|"brain_map"|"brain_test"|"brain_doctor")
-        || profile=="backend" && matches!(name,"brain_backend_contract"|"brain_backend_capabilities"|"brain_backend_logs"|"brain_resource_add"|"brain_job_add"|"brain_agent_setup")
+        || profile=="backend" && matches!(name,"brain_db_audit"|"brain_backend_conform"|"brain_vitals_report"|"brain_data_backfill"|"brain_google_setup"|"brain_backend_contract"|"brain_backend_capabilities"|"brain_backend_logs"|"brain_resource_add"|"brain_job_add"|"brain_agent_setup")
 }
 
 fn backend_add(args:&Json,kind:&str)->Result<String,String> {

@@ -114,6 +114,7 @@ async fn ingestion_reports_segments_exports_and_retention_on_owned_postgres() {
         .unwrap();
     let files = std::env::temp_dir().join(format!("brain-analytics-{}", Uuid::new_v4().simple()));
     let config = brain_backend::Config {
+        vitals: None,
         api_keys: None,
         resources: vec![],
         jobs: vec![],
@@ -121,7 +122,7 @@ async fn ingestion_reports_segments_exports_and_retention_on_owned_postgres() {
         origins: vec![ORIGIN.into()],
         production: false,
         jwt: None,
-        google: None, apple: None, linkedin: None,
+        google: None, apple: None, apple_native: None, linkedin: None,
         gcs: None,
         roles: Default::default(),
         mail: None,

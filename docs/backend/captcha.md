@@ -38,7 +38,13 @@ It fails closed: nothing runs without an explicit `success: true`. Tokens are si
 Production refuses to start without the secret or with a non-https `verify_url`; `http` is accepted on loopback only, for a local fake.
 Known public provider test secrets remain local-only; pass, fail and already-spent Turnstile fixtures are refused in
 production. `brain check`/`brain doctor` warn B0790 if the production environment resolves to a public fixture, without
-printing its value. Put dummy keys under development/testing and the real provider-issued secret under production.
+printing its value. Production also refuses a known public test site key proven in a reachable widget binding,
+even with a non-test secret, before opening a database connection. Literal values, direct public environment reads
+and unshadowed immutable module constants can be resolved. SDK options with uncertain overwrites, unresolved
+conditions, external JavaScript and cross-module aliases remain unknown. Discovery is bounded; this is not a browser
+or provider verification. A provider-named public test site-key setting without a proven binding is advisory and does
+not refuse startup. Library hosts supplied only the server contract cannot infer browser site keys. Put dummy keys
+under development/testing and provider-issued site and secret keys under production.
 Provider-specific checks (action names, scores) are not read.
 
 `hostname` is optional. Set it when one site uses the key; omit it for a widget shared by several hosts (production and a

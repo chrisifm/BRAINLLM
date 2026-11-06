@@ -15,6 +15,7 @@ pub mod focus;
 pub mod config;
 pub mod content;
 pub mod files;
+pub mod google;
 pub mod hreflang;
 pub mod html;
 pub mod indexnow;
@@ -929,8 +930,8 @@ pub fn finish_with_og(
         redirects::load(root).map_err(|(m, f)| format!("B1825 redirects.json: {m}; fix: {f}"))?;
     let page_routes: Vec<String> = pages.iter().map(|p| p.route.clone()).collect();
     let exists = |p: &str| {
-        page_routes.iter().any(|r| audit::norm(r) == p)
-            || routes.iter().any(|r| audit::matches_pattern(r, p))
+        page_routes.iter().any(|r| audit::norm(r) == audit::norm(p))
+            || routes.iter().any(|r| audit::matches_pattern(r, p) && cfg.route_allows(r,p))
             || all_assets.iter().any(|(a, _)| format!("/{a}") == p)
     };
     let bad = redirects::validate(&rules, &page_routes, &exists);
@@ -944,7 +945,10 @@ pub fn finish_with_og(
                 .join("\n")
         ));
     }
-    if !rules.is_empty() || !cfg.redirect_policy.is_default() {
+    if redirects::has_constraints(&rules) {
+        files.push(("_brain/redirect-capabilities.json".into(),redirects::capabilities(&rules).stringify()));
+        warnings.push("unsupported redirect host exports: _redirects, nginx and Caddy were omitted because raw-segment constraints require the BRAINLLM server runtime; fix: deploy the server output or replace these rules with explicit literal redirects".into());
+    } else if !rules.is_empty() || !cfg.redirect_policy.is_default() {
         files.push(("_redirects".into(), redirects::netlify_with(&rules, &cfg.redirect_policy)));
     }
     if let (Some(site), Ok(prev)) = (
@@ -960,7 +964,7 @@ pub fn finish_with_og(
         }
     }
     if let (Some(list), false) = (register_read(root), cfg.staging) {
-        let gone = register_gone(&list, &exists, &rules);
+        let gone = register_gone_with_constraints(cfg, &list, &exists, &rules);
         if !gone.is_empty() {
             return Err(register_gone_text(&gone));
         }
@@ -1142,9 +1146,17 @@ pub fn register_read(root: &Path) -> Option<Vec<String>> {
 
 /// Registered URLs that no longer exist and that no redirect rule covers.
 pub fn register_gone(list: &[String], exists: &dyn Fn(&str) -> bool, rules: &[redirects::Rule]) -> Vec<String> {
+    register_gone_by(list,exists,rules,false)
+}
+/// Dynamic opt-in constraints inspect the wire path; static file comparisons still use their canonical norm.
+pub fn register_gone_with_constraints(cfg:&Config,list:&[String],exists:&dyn Fn(&str)->bool,rules:&[redirects::Rule])->Vec<String> {
+    register_gone_by(list,exists,rules,!cfg.route_params.is_empty())
+}
+fn register_gone_by(list:&[String],exists:&dyn Fn(&str)->bool,rules:&[redirects::Rule],raw:bool)->Vec<String> {
     list.iter().filter(|u| {
-        let path = audit::norm(u);
-        !exists(&path) && !rules.iter().any(|r| redirects::apply(r, &path).is_some())
+        let normalized=audit::norm(u);
+        let path=if raw {audit::raw_norm(u)}else{normalized.clone()};
+        !exists(&path) && !rules.iter().any(|r| redirects::apply(r,if r.params.is_empty(){&normalized}else{u}).is_some())
     }).cloned().collect()
 }
 
@@ -1261,8 +1273,8 @@ fn cli_with_output(root: &Path, args: &[String], keyword: &dyn Fn(&str) -> Optio
         }
         if let Some(list) = register_read(root).filter(|_| !cfg.staging) {
             let ssr: Vec<String> = routes.clone();
-            let exists = |p: &str| pages.iter().any(|q| audit::norm(&q.route) == p) || ssr.iter().any(|r| audit::matches_pattern(r, p)) || assets.iter().any(|(a, _)| format!("/{a}") == p);
-            let gone = register_gone(&list, &exists, &rules);
+            let exists = |p: &str| pages.iter().any(|q| audit::norm(&q.route) == audit::norm(p)) || ssr.iter().any(|r| audit::matches_pattern(r, p) && cfg.route_allows(r,p)) || assets.iter().any(|(a, _)| format!("/{a}") == p);
+            let gone = register_gone_with_constraints(&cfg, &list, &exists, &rules);
             if !gone.is_empty() {
                 let text = register_gone_text(&gone);
                 let (msg, fix) = text.split_once("; fix: ").unwrap_or((&text, ""));
@@ -1411,7 +1423,7 @@ fn cli_with_output(root: &Path, args: &[String], keyword: &dyn Fn(&str) -> Optio
         let ssr = server_routes(dist);
         let exists = |p: &str| {
             routes.iter().any(|r| audit::norm(r) == p)
-                || ssr.iter().any(|r| audit::matches_pattern(r, p))
+                || ssr.iter().any(|r| audit::matches_pattern(r, p) && cfg.route_allows(r,p))
                 || assets.iter().any(|(a, _)| format!("/{a}") == p)
         };
         let problems = redirects::validate(&rules, &routes, &exists);
@@ -1452,6 +1464,7 @@ fn cli_with_output(root: &Path, args: &[String], keyword: &dyn Fn(&str) -> Optio
                 ("nginx", Json::str(redirects::nginx(&rules))),
                 ("caddy", Json::str(redirects::caddy(&rules))),
                 ("netlify", Json::str(redirects::netlify(&rules))),
+                ("capabilities", redirects::capabilities(&rules)),
                 ("server", redirects::server_json(&rules)),
             ]);
             return (if ok { 0 } else { 1 }, j.stringify());
@@ -1460,7 +1473,9 @@ fn cli_with_output(root: &Path, args: &[String], keyword: &dyn Fn(&str) -> Optio
         for (m, f) in &problems {
             o.push_str(&format!("  error B1825: {m} · fix: {f}\n"));
         }
-        if ok && !rules.is_empty() {
+        if ok && redirects::has_constraints(&rules) {
+            o.push_str("Host exports unsupported: constrained redirects require the BRAINLLM server runtime. No host rules were emitted.\n");
+        } else if ok && !rules.is_empty() {
             o.push_str(&format!("\n_redirects (Cloudflare Pages, Netlify; already in dist/):\n{}\nnginx (server block):\n{}\nCaddy (site block):\n{}", redirects::netlify(&rules), redirects::nginx(&rules), redirects::caddy(&rules)));
         }
         return (if ok { 0 } else { 1 }, o);

@@ -1,0 +1,41 @@
+{
+  "id": "performance-advice",
+  "kind": "change",
+  "title": "Conservative structural performance advice",
+  "why": "New native warnings report specific structural traversal, serial await, item-dependent declared GET and proven DOM layout patterns. Guidance is conditional and makes no purity, exact query-count, timing or safe-rewrite claim.",
+  "changelog": [
+    "Conservative performance warnings expose structural review opportunities"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "apis": [
+    "brain check",
+    "brain manifest practices"
+  ],
+  "affects": [
+    "views/**",
+    "comp/**",
+    "ui/**"
+  ],
+  "codes": [
+    "B1301",
+    "B1303",
+    "B1305",
+    "B1312",
+    "B1313"
+  ],
+  "steps": [
+    "Review each native diagnostic in its exact source context.",
+    "Measure and preserve dependency, ordering, ownership and policy before changing work; no automatic edits are offered."
+  ],
+  "finds": [
+    {
+      "glob": "views/**"
+    },
+    {
+      "glob": "comp/**"
+    },
+    {
+      "glob": "ui/**"
+    }
+  ]
+}

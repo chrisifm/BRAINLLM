@@ -6,6 +6,7 @@ pub mod codes;
 mod diag;
 pub mod json;
 pub mod url_path;
+pub mod param_pattern;
 mod lexer;
 mod span;
 

@@ -46,6 +46,17 @@
     padding: var(--space-2) var(--space-3);
   }
   [hidden] { display: none !important; }
+  @media (forced-colors: active) {
+    :focus-visible { outline-color: Highlight; }
+    button, input, textarea, select { border-color: ButtonText; }
+    a { color: LinkText; }
+  }
+  @media print {
+    html { color-scheme: light; }
+    body { min-height: 0; background: none; color: CanvasText; padding: 0; }
+    a { color: inherit; text-decoration: underline; }
+    img, svg, blockquote { break-inside: avoid; }
+  }
   @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   @media (prefers-reduced-motion: no-preference) { button { transition: transform .15s ease; } button:active { transform: scale(.98); } }

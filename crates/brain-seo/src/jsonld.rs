@@ -579,10 +579,25 @@ fn google_rules(t: &str, n: &Json, out: &mut Vec<Issue>) {
                 warn("JobPosting description is the same as its title".into(), "write the full description: responsibilities, qualifications, skills, hours, education and experience".into());
             }
             // Google: the title of the job, not of the posting; no company name, address, code, date or salary in it
-            let title = str_of(n.get("title")).unwrap_or_default().to_lowercase();
-            let company = list("hiringOrganization").iter().filter_map(|o| str_of(o.get("name"))).map(|c| c.trim().to_string()).find(|c| c.chars().count() >= 3 && title.contains(&c.to_lowercase()));
+            let title = str_of(n.get("title")).unwrap_or_default();
+            let title_words = crate::focus::tokens(&title);
+            // Match complete words, so a company named "Art" does not flag "Partner".
+            let names = |value: &str| {
+                let words = crate::focus::tokens(value);
+                value.chars().count() >= 3 && !words.is_empty() && title_words.windows(words.len()).any(|w| w == words)
+            };
+            let company = list("hiringOrganization").iter().filter_map(|o| str_of(o.get("name"))).map(|c| c.trim().to_string()).find(|c| names(c));
             if let Some(c) = company {
                 warn(format!("JobPosting title names the company `{c}`"), "keep `title` to the job itself (\"Senior data engineer\"); the company goes in hiringOrganization and the place in jobLocation, and the page <title> can still name both".into());
+            }
+            let location = list("jobLocation").iter().filter_map(|l| l.get("address")).flat_map(|a| ["streetAddress", "addressLocality", "addressRegion"].into_iter().filter_map(move |key| str_of(a.get(key)))).find(|place| names(place) && !["remote", "hybrid", "office", "onsite", "on site", "anywhere"].contains(&crate::focus::tokens(place).join(" ").as_str()));
+            if let Some(place) = location {
+                warn(format!("JobPosting title appears to include its location `{place}`"), "review the title with the employer: keep the job title in `title` and its location in `jobLocation`; this token match is a heuristic, not an automatic correction".into());
+            }
+            // Separator counts are a review hint, not a documented numeric limit. Ordinary slashes and hyphens are valid.
+            let separators = title.chars().filter(|c| matches!(c, '|' | '•' | '—' | '–')).count();
+            if separators >= 2 || title.contains("!!") || title.contains("**") {
+                warn("JobPosting title appears to repeat separators or special characters".into(), "review the employer's title for extra posting details and excessive punctuation; ordinary `/` and `-` are valid, and this heuristic never rewrites the title".into());
             }
             if (1..=6).any(|h| description.to_ascii_lowercase().contains(&format!("<h{h}"))) {
                 warn("JobPosting description uses heading tags".into(), "use <p>, <ul> and <li>: those are the tags Google recognizes in a job description".into());
@@ -1067,4 +1082,26 @@ mod tests {
             assert!(out.iter().any(|i| i.msg.contains(expected)), "{expected}");
         }
     }
+    #[test]
+    fn job_titles_check_own_location_and_punctuation_without_substring_matches() {
+        let check = |title: &str| {
+            let node = Json::obj([
+                ("title", Json::str(title)),
+                ("hiringOrganization", Json::obj([("name", Json::str("Art"))])),
+                ("jobLocation", Json::Arr(vec![Json::obj([("address", Json::obj([
+                    ("addressCountry", Json::str("US")), ("addressLocality", Json::str("North Harbor")),
+                ]))])])),
+            ]);
+            let mut out = Vec::new();
+            google_rules("JobPosting", &node, &mut out);
+            out.into_iter().map(|i| i.msg).collect::<Vec<_>>()
+        };
+        assert!(check("Partner / Senior Engineer - Platform").is_empty());
+        assert!(check("Engineer at Art").iter().any(|m| m.contains("title names the company")));
+        assert!(check("Engineer in NORTH HARBOR").iter().any(|m| m.contains("location")));
+        assert!(check("Engineer | Remote | Full time").iter().any(|m| m.contains("separators")));
+        assert!(check("Engineer!!").iter().any(|m| m.contains("special characters")));
+        assert!(check("Engineer * Platform").is_empty());
+    }
+
 }

@@ -90,10 +90,40 @@ test('a job that catches backend failures still succeeds and reports their shape
   const lines=r.stderr.split('\n').filter(line=>line.startsWith('JOB_BACKEND '))
   assert.equal(lines.length,1,r.stderr)
   assert.deepEqual(JSON.parse(lines[0].slice('JOB_BACKEND '.length)),{schemaVersion:1,event:'job-backend-failures',jobId:'00000000-0000-4000-8000-000000000009',count:4,failures:[
-    {status:422,code:null,target:'orders',fields:['status'],count:3},
+    {status:422,code:'INVALID_INPUT',target:'orders',fields:['status'],count:3},
     {status:403,code:'API_KEY_SCOPE_DENIED',target:'secret',fields:[],count:1}
   ]})
   assert.ok(!r.stderr.includes('Expected one of')&&!r.stderr.includes('bad'))
+})
+test('local input refusals retain status and identify only fixed fields before any HTTP call',async()=>{
+  const before=seen.length
+  const r=await run(`
+    const cases=[{limit:500},{offset:-1},{search:'sensitive-text-'.repeat(40)},{filter:{status:{unknown:'sensitive-filter-value'}}},{sort:['bad.path']}]
+    const errors=[]
+    for(const options of cases){try{await ctx.backend.resource('orders').list(options)}catch(error){errors.push({status:error.status,code:error.code,fields:error.fields,message:error.message})}}
+    return errors
+  `,{BRAIN_BACKEND_URL:url,BRAIN_JOBS_API_KEY:key})
+  assert.equal(r.code,0,r.stderr)
+  assert.equal(seen.length,before,'invalid client shapes must not reach the backend')
+  assert.equal(r.value.length,5)
+  for(const [index,field]of ['limit','offset','search','filter','sort'].entries()){
+    assert.equal(r.value[index].status,400)
+    assert.equal(r.value[index].code,'INVALID_INPUT')
+    assert.equal(typeof r.value[index].fields[field],'string')
+  }
+  assert.ok(!JSON.stringify(r.value).includes('sensitive-text-')&&!JSON.stringify(r.value).includes('sensitive-filter-value'))
+})
+test('an uncaught local validation failure has a bounded actionable job trace without submitted values',async()=>{
+  const r=await run(`await ctx.backend.resource('orders').list({limit:500,search:'sensitive-job-value-'.repeat(40)})`,{BRAIN_BACKEND_URL:url,BRAIN_JOBS_API_KEY:key})
+  assert.equal(r.code,1)
+  const line=r.stderr.split('\n').find(line=>line.startsWith('JOB_TRACE '))
+  assert.ok(line,r.stderr)
+  const trace=JSON.parse(line.slice('JOB_TRACE '.length))
+  assert.equal(trace.backend.status,400)
+  assert.equal(trace.backend.code,'INVALID_INPUT')
+  assert.ok(trace.backend.fields.limit.includes('100'))
+  assert.ok(trace.backend.fields.search.includes('256'))
+  assert.ok(!r.stderr.includes('sensitive-job-value-'))
 })
 test('a job without backend failures writes no report line',async()=>{
   const r=await run(`await ctx.backend.resource('orders').list();return 1`,{BRAIN_BACKEND_URL:url,BRAIN_JOBS_API_KEY:key})

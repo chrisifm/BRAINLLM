@@ -1,0 +1,25 @@
+{
+  "id": "computed-data-backfills",
+  "kind": "capability",
+  "title": "Reviewed computed-data backfill batches",
+  "why": "Deterministic declared field computation supports a read-only plan, exact approval binding, bounded atomic batches and checkpointed resume. Immutable migrations, row audit and original update timestamps are preserved.",
+  "changelog": [
+    "Computed field backfills use reviewed resumable atomic batches"
+  ],
+  "guide": "docs/backend/backfills.md",
+  "apis": [
+    "brain data backfill"
+  ],
+  "affects": [
+    "server/backfills/*.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/backfills/labels.jsbrain",
+    "snippet": "<meta server>\nexport default { resource: 'products', field: 'label', compute: row => row.data.title.trim() }"
+  },
+  "uses": [
+    {
+      "glob": "server/backfills/*.jsbrain"
+    }
+  ]
+}

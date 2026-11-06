@@ -1,0 +1,29 @@
+{
+  "id": "live-seo-review-tools",
+  "kind": "capability",
+  "title": "Live preview and sitemap coverage review",
+  "why": "Live preview inspects exactly one anonymous HTML response, while sitemap diff preserves missing-path verdicts. Live crawling uses shared time/request/byte bounds and explicit incomplete errors; title advice avoids substring-only job metadata false positives.",
+  "changelog": [
+    "Live SEO preview, sitemap diff and bounded family sampling improve review"
+  ],
+  "guide": "docs/SEO-SITE.md",
+  "apis": [
+    "brain seo preview",
+    "brain seo diff",
+    "brain seo audit"
+  ],
+  "affects": [
+    "package.json"
+  ],
+  "adopt": {
+    "file": "package.json",
+    "snippet": "{\"scripts\":{\"seo:diff\":\"brain seo diff --from baseline.xml --json\"}}",
+    "command": "brain seo diff --from baseline.xml --json"
+  },
+  "uses": [
+    {
+      "glob": "package.json",
+      "contains": "brain seo diff"
+    }
+  ]
+}

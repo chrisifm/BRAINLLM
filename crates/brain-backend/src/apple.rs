@@ -4,7 +4,7 @@
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use serde::Deserialize;
 pub use crate::oidc::Identity;
-const JWKS_URL: &str = "https://appleid.apple.com/auth/keys";
+pub(crate) const JWKS_URL: &str = "https://appleid.apple.com/auth/keys";
 const ISSUER: &str = "https://appleid.apple.com";
 /// Mailboxes Apple hosts: a shared address there belongs to the Apple Account that signs in with it.
 const APPLE_MAIL: [&str; 3] = ["icloud.com", "me.com", "mac.com"];
@@ -47,7 +47,7 @@ fn return_url(value: &str) -> bool {
     })
 }
 /// A reverse-DNS identifier as Apple registers Services IDs and bundle IDs.
-fn bundle_id(value: &str) -> bool {
+pub(crate) fn bundle_id(value: &str) -> bool {
     (3..=255).contains(&value.len())
         && value.contains('.')
         && value.split('.').all(|part| {
@@ -75,6 +75,7 @@ impl Flag {
 }
 #[derive(Deserialize)]
 struct Claims {
+    aud: String,
     sub: String,
     iss: String,
     exp: u64,
@@ -138,15 +139,20 @@ impl Apple {
             .await
     }
     fn verify_key(&self, id_token: &str, nonce: &str, key: &DecodingKey) -> Option<Identity> {
+        Self::verify_identity_key(id_token, nonce, key, &self.config.client_id)
+    }
+    /// The caller supplies a server-selected audience, never one read from unverified token claims.
+    pub(crate) fn verify_identity_key(id_token: &str, nonce: &str, key: &DecodingKey, audience: &str) -> Option<Identity> {
         let mut validation = Validation::new(Algorithm::RS256);
         validation.leeway = 0;
         validation.validate_nbf = true;
         validation.set_required_spec_claims(&["exp", "iss", "aud", "sub"]);
         validation.set_issuer(&[ISSUER]);
-        validation.set_audience(&[&self.config.client_id]);
+        validation.set_audience(&[audience]);
         let claims = decode::<Claims>(id_token, key, &validation).ok()?.claims;
         let now = crate::jwt::now();
         if !crate::oidc::identifier(&claims.sub)
+            || claims.aud != audience
             || claims.nonce.as_deref() != Some(nonce)
             || claims.iat > now + 30
             || claims.exp <= claims.iat

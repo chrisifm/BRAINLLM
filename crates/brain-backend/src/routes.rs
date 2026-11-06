@@ -91,6 +91,8 @@ pub enum Encoding {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Scheme {
+    /// Trusted project `verify.jsbrain`; only its strict boolean true admits the handler.
+    Custom,
     /// `t=<unix seconds>,v1=<hex>[,v1=<hex>]` over `<t>.<raw body>`.
     Timestamped,
     /// `<prefix><digest>` over the raw body, e.g. `sha256=<hex>`.
@@ -120,6 +122,7 @@ pub enum Rejection {
 }
 
 impl Verifier {
+    pub fn is_custom(&self) -> bool { matches!(self.scheme, Scheme::Custom) }
     pub fn new(scheme: Scheme, header: &str, secrets: &[Vec<u8>], tolerance: Duration) -> Self {
         Self {
             scheme,
@@ -133,11 +136,14 @@ impl Verifier {
     }
     /// Constant-time verification of `value` (the signature header) over `raw`. `now` is unix seconds.
     pub fn verify(&self, value: Option<&str>, raw: &[u8], now: u64) -> Result<Option<u64>, Rejection> {
+        // A legacy host cannot accidentally admit a custom route through a built-in verification call.
+        if self.is_custom() { return Err(Rejection::Mismatch); }
         let value = value.map(str::trim).filter(|v| !v.is_empty()).ok_or(Rejection::Missing)?;
         if value.len() > 2048 {
             return Err(Rejection::Malformed);
         }
         match &self.scheme {
+            Scheme::Custom => Err(Rejection::Mismatch),
             Scheme::Timestamped => {
                 let mut timestamp = None;
                 let mut digests = Vec::new();
@@ -394,6 +400,11 @@ impl Route {
             }
         }
         let verify = map.get("verify").map(|v| verifier(&at, v, env)).transpose()?;
+        if verify.as_ref().is_some_and(Verifier::is_custom)
+            && (!matches!(access, Access::Public) || !raw_body || !matches!(method.as_str(), "POST" | "PUT" | "PATCH" | "DELETE"))
+        {
+            return Err(format!("{at}: custom verification requires auth: 'public', body: 'raw' and a mutation method (POST, PUT, PATCH or DELETE)"));
+        }
         if verify.is_some() && method == axum::http::Method::GET {
             return Err(format!("{at}: signed routes receive a body; use POST, PUT or PATCH"));
         }
@@ -417,7 +428,7 @@ impl Route {
             "auth": match &self.access { Access::Public => json!("public"), Access::SignedIn => json!("user"), Access::Roles(r) => json!(r), Access::Internal(_) => json!("internal") },
             "body": if self.raw_body { "raw" } else { "json" }, "bodyLimit": self.body_limit, "timeoutMs": self.timeout.as_millis() as u64,
             "rate": self.rate.as_ref().map(|r| json!({"count": r.count, "windowSeconds": r.window.as_secs(), "per": if r.key == RateKey::User { "user" } else { "ip" }})),
-            "signed": self.verify.as_ref().map(|v| json!({"header": v.header, "scheme": match v.scheme { Scheme::Timestamped => "timestamped", Scheme::Hmac { .. } => "hmac" }})),
+            "signed": self.verify.as_ref().map(|v| if v.is_custom() {json!({"scheme":"custom"})} else {json!({"header": v.header, "scheme": match v.scheme { Scheme::Custom => "custom", Scheme::Timestamped => "timestamped", Scheme::Hmac { .. } => "hmac" }})}),
             "params": self.params.iter().map(|(k, v)| (k.clone(), json!(format!("{v:?}").to_lowercase()))).collect::<Map<_, _>>(),
             "query": self.query.iter().map(|(k, p)| (k.clone(), json!({"kind": format!("{:?}", p.kind).to_lowercase(), "required": p.required}))).collect::<Map<_, _>>(),
             "headers": self.headers,
@@ -462,6 +473,10 @@ fn internal(at: &str, value: Option<&Value>, env: &dyn Fn(&str) -> Option<String
 fn verifier(at: &str, value: &Value, env: &dyn Fn(&str) -> Option<String>) -> Result<Verifier, String> {
     let at = format!("{at}.verify");
     let map = object(value, &at, &["scheme", "header", "secret", "tolerance", "prefix", "encoding"])?;
+    if map.get("scheme").and_then(Value::as_str)==Some("custom") {
+        if map.len()!=1 { return Err(format!("{at}: custom verification declares only scheme: 'custom'; declare forwarded signature headers in the route's headers list")); }
+        return Ok(Verifier::new(Scheme::Custom, "", &[], Duration::ZERO));
+    }
     let header = map.get("header").and_then(Value::as_str).ok_or_else(|| format!("{at}.header names the signature header"))?;
     let names: Vec<&str> = match map.get("secret") {
         Some(Value::String(s)) => vec![s.as_str()],
@@ -491,7 +506,7 @@ fn verifier(at: &str, value: &Value, env: &dyn Fn(&str) -> Option<String>) -> Re
                 _ => return Err(format!("{at}.encoding must be 'hex' or 'base64'")),
             },
         },
-        _ => return Err(format!("{at}.scheme must be 'timestamped' (t=…,v1=…) or 'hmac' (e.g. sha256=…)")),
+        _ => return Err(format!("{at}.scheme must be 'timestamped' (t=…,v1=…), 'hmac' (e.g. sha256=…) or 'custom' (verify.jsbrain)")),
     };
     let tolerance = match map.get("tolerance") {
         None => Duration::from_secs(300),
@@ -565,6 +580,11 @@ pub enum RouteFailure {
 /// Runs project route handlers. Implemented by the CLI with private Node sidecars.
 pub trait RouteHandlers: Send + Sync {
     fn names(&self) -> Vec<String>;
+    /// Old embedding hosts grant no verification capability by implementing only `run`.
+    fn verifiers(&self) -> Vec<String> { Vec::new() }
+    fn verify(&self, _name: &str, _context: Value, _timeout: Duration) -> Pin<Box<dyn Future<Output = Result<bool, RouteFailure>> + Send + '_>> {
+        Box::pin(async { Err(RouteFailure::Unavailable) })
+    }
     fn run(&self, name: &str, context: Value, timeout: Duration) -> Pin<Box<dyn Future<Output = Result<Value, RouteFailure>> + Send + '_>>;
 }
 pub type Handlers = Arc<dyn RouteHandlers>;
@@ -581,6 +601,30 @@ mod tests {
     }
     fn to_hex(bytes: &[u8]) -> String {
         bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    #[test]
+    fn custom_verification_is_explicit_raw_public_mutation_only_and_never_a_builtin_success() {
+        let contract=json!({"method":"POST","path":"/events/custom","auth":"public","body":"raw","headers":["x-event-signature"],"verify":{"scheme":"custom"}});
+        let route=Route::from_contract("custom_events",&contract,&|_|None).unwrap();
+        assert!(route.verify.as_ref().unwrap().is_custom());
+        assert_eq!(route.schema()["signed"],json!({"scheme":"custom"}));
+        assert!(route.verify.as_ref().unwrap().verify(Some("anything"),b"payload",0).is_err());
+        for (key,value) in [("method",json!("GET")),("method",json!("HEAD")),("auth",json!("user")),("body",json!("json")),("verify",json!({"scheme":"custom","secret":"CUSTOM_SECRET"})),("verify",json!({"scheme":"custom","header":"x-signature"}))] {
+            let mut invalid=contract.clone();invalid[key]=value;
+            assert!(Route::from_contract("custom_events",&invalid,&|_|None).is_err(),"{invalid}");
+        }
+    }
+
+    #[tokio::test]
+    async fn legacy_handler_hosts_have_no_implicit_verifier_capability() {
+        struct Legacy;
+        impl RouteHandlers for Legacy {
+            fn names(&self)->Vec<String>{vec!["custom_events".into()]}
+            fn run(&self,_:&str,_:Value,_:Duration)->Pin<Box<dyn Future<Output=Result<Value,RouteFailure>>+Send+'_>>{Box::pin(async {Ok(json!(true))})}
+        }
+        assert!(Legacy.verifiers().is_empty());
+        assert!(matches!(Legacy.verify("custom_events",json!({}),Duration::from_secs(1)).await,Err(RouteFailure::Unavailable)));
     }
 
     #[test]

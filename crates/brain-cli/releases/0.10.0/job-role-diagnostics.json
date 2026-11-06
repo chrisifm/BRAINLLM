@@ -1,0 +1,19 @@
+{
+  "id": "job-role-diagnostics",
+  "kind": "fix",
+  "title": "Structured private backend failure causes",
+  "why": "Job backend input failures retain field and handler location metadata; undeclared authenticated roles produce a bounded fixed private cause without exposing identities. System-key audit attribution follows its immutable key record.",
+  "changelog": [
+    "Job input and unknown-role failures retain bounded private causes"
+  ],
+  "guide": "docs/ERROR-TRACES.md",
+  "apis": [
+    "ctx.backend",
+    "backend-policy-denied"
+  ],
+  "affects": [
+    "server/jobs/**",
+    "server/routes/**",
+    "server/auth/**"
+  ]
+}

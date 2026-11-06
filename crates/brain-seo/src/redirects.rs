@@ -11,6 +11,7 @@ pub struct Rule {
     pub from: String,
     pub to: String,
     pub status: u16,
+    pub params: brain_lex::param_pattern::Params,
 }
 
 impl Rule {
@@ -81,6 +82,10 @@ pub fn parse(src: &str) -> Result<Vec<Rule>, Problem> {
     };
     let mut out = Vec::new();
     for (i, it) in items.iter().enumerate() {
+        if it.get("params").is_some() {
+            let Json::Obj(kv)=it else {unreachable!()};
+            for(i,(key,_))in kv.iter().enumerate(){if kv[..i].iter().any(|(k,_)|k==key){return Err(("redirect rule with params has a duplicate key".into(),"keep each rule key once".into()));}}
+        }
         let s = |k: &str| {
             it.get(k)
                 .and_then(Json::as_str)
@@ -104,9 +109,18 @@ pub fn parse(src: &str) -> Result<Vec<Rule>, Problem> {
                 ));
             }
         };
-        out.push(Rule { from, to, status });
+        let params=it.get("params").map(|j|brain_lex::param_pattern::parse_params(j,&from,"redirect params")).transpose().map_err(|e|(e,"declare each named parameter once using a bounded pattern".into()))?.unwrap_or_default();
+        out.push(Rule { from, to, status, params });
     }
     Ok(out)
+}
+
+/// The new diagnostic is opt-in only; all pattern parsing is delegated to the build/runtime rule parser.
+pub fn check_constraints(root:&std::path::Path)->Result<(),String> {
+    let Ok(source)=std::fs::read_to_string(root.join("redirects.json")) else{return Ok(());};
+    let Ok(Json::Arr(items))=Json::parse(&source) else{return Ok(());};
+    if !items.iter().any(|rule|rule.get("params").is_some()) {return Ok(());}
+    parse(&source).map(|_|()).map_err(|(m,f)|format!("{m}; fix: {f}"))
 }
 
 /// Reads `<root>/redirects.json` (empty when absent).
@@ -132,7 +146,10 @@ pub fn apply(rule: &Rule, path: &str) -> Option<String> {
     let mut vars: Vec<(String, String)> = Vec::new();
     for (p, g) in pat[..fixed].iter().zip(&got) {
         match p.strip_prefix(':') {
-            Some(name) => vars.push((name.to_string(), g.to_string())),
+            Some(name) => {
+                if rule.params.get(name).is_some_and(|p|!p.matches(g)) {return None;}
+                vars.push((name.to_string(), g.to_string()));
+            },
             None if norm(&format!("/{p}")) == norm(&format!("/{g}")) => {}
             None => return None,
         }
@@ -146,6 +163,20 @@ pub fn apply(rule: &Rule, path: &str) -> Option<String> {
         to = to.replace(&format!(":{k}"), v);
     }
     Some(to)
+}
+
+// Template-identical hops preserve captured values. Only follow constraints already guaranteed by the source;
+// different predicates may make a symbolic cycle unreachable and must not produce a false error.
+fn constrained_template_loop(start:&Rule,rules:&[Rule])->bool {
+    let path=|to:&str|norm(to.split(['?','#']).next().unwrap_or(to));
+    let mut seen=vec![norm(&start.from)];let mut current=path(&start.to);
+    for _ in 0..=rules.len() {
+        if seen.contains(&current) {return true;}
+        let Some(next)=rules.iter().find(|r|norm(&r.from)==current)else{return false;};
+        if next.external() || !next.params.iter().all(|(key,p)|start.params.get(key)==Some(p)) {return false;}
+        seen.push(current);current=path(&next.to);
+    }
+    false
 }
 
 /// Validates the rules against the built routes. `exists(path)` answers whether a target is served.
@@ -170,6 +201,9 @@ pub fn validate(rules: &[Rule], pages: &[String], exists: &dyn Fn(&str) -> bool)
                 format!("`{}` is still a page, so the redirect never runs", r.from),
                 "delete or rename the view, or remove the rule".into(),
             ));
+        }
+        if !r.params.is_empty() && constrained_template_loop(r,rules) {
+            out.push((format!("`{}` redirects in a constrained parameter loop",r.from),"point the rules at a distinct served target".into()));
         }
         if r.external() || r.to.contains(':') && r.is_pattern() {
             continue;
@@ -232,6 +266,18 @@ pub fn validate(rules: &[Rule], pages: &[String], exists: &dyn Fn(&str) -> bool)
     out
 }
 
+/// Host files are optional hints. A restricted rule cannot be silently widened on a host with different URI semantics.
+pub fn has_constraints(rules:&[Rule])->bool {rules.iter().any(|r|!r.params.is_empty())}
+pub fn unsupported_hint()->String {"# Unsupported constrained redirects: use the BRAINLLM server runtime; no host rules were emitted.\n".into()}
+pub fn capabilities(rules:&[Rule])->Json {
+    Json::obj([("schemaVersion",Json::Num(1.0)),("runtime",Json::Bool(true)),("unsupported",Json::Arr(if has_constraints(rules){["netlify","cloudflare-pages","nginx","caddy"].into_iter().map(|name|Json::obj([("format",Json::str(name)),("reason",Json::str("raw-segment constraint equivalence is not implemented"))])).collect()}else{vec![]}))])
+}
+/// Explicit host export is an error rather than an empty or broader configuration.
+pub fn export(rules:&[Rule],format:&str)->Result<String,String>{
+    if has_constraints(rules) {return Err(format!("constrained redirects cannot be exported to {format}; fix: use the server runtime or explicit literal rules"));}
+    match format {"netlify"|"cloudflare-pages"=>Ok(netlify(rules)),"nginx"=>Ok(nginx(rules)),"caddy"=>Ok(caddy(rules)),_=>Err("unknown redirect export format; fix: use nginx, caddy, netlify or cloudflare-pages".into())}
+}
+
 /// `_redirects` for Cloudflare Pages and Netlify (`*` → `:splat`).
 pub fn netlify(rules: &[Rule]) -> String {
     netlify_with(rules, &Policy::default())
@@ -239,6 +285,7 @@ pub fn netlify(rules: &[Rule]) -> String {
 
 /// [`netlify`] plus the policy as a leading comment line (hosts ignore `#` lines; `brain start` reads it).
 pub fn netlify_with(rules: &[Rule], policy: &Policy) -> String {
+    if has_constraints(rules) {return unsupported_hint();}
     let mut o = String::new();
     if !policy.is_default() {
         o.push_str(&format!("# brain trailingSlash={}", policy.slash_name()));
@@ -275,7 +322,7 @@ pub fn parse_netlify(src: &str) -> (Vec<Rule>, Policy) {
         let mut it = line.split_whitespace();
         if let (Some(from), Some(to)) = (it.next(), it.next()) {
             let status = it.next().and_then(|s| s.parse().ok()).filter(|s| [301, 302, 307, 308].contains(s)).unwrap_or(301);
-            rules.push(Rule { from: from.into(), to: to.into(), status });
+            rules.push(Rule { from: from.into(), to: to.into(), status, params:Default::default() });
         }
     }
     (rules, policy)
@@ -286,9 +333,14 @@ pub fn parse_netlify(src: &str) -> (Vec<Rule>, Policy) {
 /// `None` when the URL is already canonical. `(location, status)`; the query is kept unless the rule's target
 /// has its own.
 pub fn resolve(rules: &[Rule], policy: &Policy, path: &str, query: &str, host: Option<&str>) -> Option<(String, u16)> {
-    let (mut p, mut q, mut status, mut moved) = (path.to_string(), query.to_string(), 301, false);
+    resolve_request(rules,policy,path,path,query,host)
+}
+/// Dev keeps decoded legacy rule semantics while constrained sources compare the original wire path.
+pub fn resolve_request(rules:&[Rule],policy:&Policy,path:&str,raw:&str,query:&str,host:Option<&str>)->Option<(String,u16)> {
+    let original=if has_constraints(rules){raw}else{path};
+    let (mut p, mut q, mut status, mut moved) = (original.to_string(), query.to_string(), 301, false);
     // exact sources first, then patterns (as server.mjs does)
-    let hit = |pattern: bool| rules.iter().filter(|r| r.is_pattern() == pattern).find_map(|r| apply(r, path).map(|t| (r, t)));
+    let hit = |pattern: bool| rules.iter().filter(|r| r.is_pattern() == pattern).find_map(|r| apply(r, if r.params.is_empty(){path}else{raw}).map(|t| (r, t)));
     if let Some((rule, to)) = hit(false).or_else(|| hit(true)) {
         if rule.external() {
             return Some((to, rule.status));
@@ -321,19 +373,20 @@ pub fn resolve(rules: &[Rule], policy: &Policy, path: &str, query: &str, host: O
         let want = origin.split("://").nth(1)?.trim_end_matches('/');
         host.filter(|h| !loopback(h) && !h.eq_ignore_ascii_case(want)).map(|_| origin.trim_end_matches('/'))
     });
-    if !moved && other.is_none() && p == path {
+    if !moved && other.is_none() && p == original {
         return None;
     }
     Some((format!("{}{p}{q}", other.unwrap_or("")), status))
 }
 
-fn regex_of(from: &str) -> (String, Vec<String>) {
+fn regex_of(rule: &Rule) -> (String, Vec<String>) {
+    let from=&rule.from;
     let mut re = String::from("^");
     let mut names = Vec::new();
     for s in segs(from) {
         re.push('/');
         if let Some(n) = s.strip_prefix(':') {
-            re.push_str("([^/]+)");
+            match rule.params.get(n) {Some(p)=>re.push_str(&format!("({})",p.regex_source())),None=>re.push_str("([^/]+)")};
             names.push(n.to_string());
         } else if s == "*" {
             re.push_str("(.*)");
@@ -366,10 +419,11 @@ fn target_with(to: &str, names: &[String], group: &dyn Fn(usize) -> String) -> S
 
 /// nginx `server { }` snippet.
 pub fn nginx(rules: &[Rule]) -> String {
+    if has_constraints(rules) {return unsupported_hint();}
     let mut o = String::new();
     for r in rules {
         if r.is_pattern() {
-            let (re, names) = regex_of(&r.from);
+            let (re, names) = regex_of(r);
             o.push_str(&format!(
                 "location ~ {re} {{ return {} {}; }}\n",
                 r.status,
@@ -387,10 +441,11 @@ pub fn nginx(rules: &[Rule]) -> String {
 
 /// Caddyfile snippet (inside the site block).
 pub fn caddy(rules: &[Rule]) -> String {
+    if has_constraints(rules) {return unsupported_hint();}
     let mut o = String::new();
     for (i, r) in rules.iter().enumerate() {
         if r.is_pattern() {
-            let (re, names) = regex_of(&r.from);
+            let (re, names) = regex_of(r);
             let n = format!("r{}", i + 1);
             o.push_str(&format!(
                 "@{n} path_regexp {n} {re}\nredir @{n} {} {}\n",
@@ -434,7 +489,7 @@ pub fn server_json(rules: &[Rule]) -> Json {
         .iter()
         .filter(|r| r.is_pattern())
         .map(|r| {
-            let (re, names) = regex_of(&r.from);
+            let (re, names) = regex_of(r);
             Json::obj([
                 ("re", Json::str(re)),
                 (
@@ -476,7 +531,7 @@ pub fn removed(
             continue;
         };
         let p = norm(&path);
-        if pages.iter().any(|x| norm(x) == p) || rules.iter().any(|r| apply(r, &p).is_some()) {
+        if pages.iter().any(|x| norm(x) == p) || rules.iter().any(|r| apply(r, if r.params.is_empty(){&p}else{&path}).is_some()) {
             continue;
         }
         let last = segs(&p).last().copied().unwrap_or("").to_string();
@@ -629,5 +684,45 @@ mod tests {
                 ("/team".into(), None)
             ]
         );
+    }
+}
+
+#[cfg(test)]
+mod constraint_tests {
+    use super::*;
+    #[test]
+    fn constrained_redirects_preserve_raw_query_slash_and_export_capabilities() {
+        let rules=parse(r#"[{"from":"/:code","params":{"code":"[2-9a-z]{7}"},"to":"/items/:code","status":308}]"#).unwrap();
+        assert_eq!(resolve(&rules,&Policy::default(),"/2abcdef/","?q=one",None),Some(("/items/2abcdef?q=one".into(),308)));
+        for path in ["/zzz","/%32abcde","/0abcdef","/2abcdefg"] {assert_eq!(resolve(&rules,&Policy::default(),path,"",None),None);}
+        assert!(has_constraints(&rules));
+        for format in ["nginx","caddy","netlify","cloudflare-pages"] {assert!(export(&rules,format).unwrap_err().contains("server runtime"));}
+        for output in [netlify(&rules),nginx(&rules),caddy(&rules)] {assert_eq!(output,unsupported_hint());assert!(!output.contains("/:code"));}
+        assert!(matches!(capabilities(&rules).get("unsupported"),Some(Json::Arr(items)) if items.len()==4));
+        assert!(server_json(&rules).stringify().contains("\\\\x32"));
+        let override_query=parse(r#"[{"from":"/:id","params":{"id":"[a-z]{2}"},"to":"/item/:id?fixed=1"}]"#).unwrap();
+        assert_eq!(resolve(&override_query,&Policy{slash:Slash::Always,host:Some("https://example.com".into())},"/ab","?q=one",Some("other.example")),Some(("https://example.com/item/ab/?fixed=1".into(),301)));
+    }
+    #[test]
+    fn new_opt_in_rejects_ambiguous_or_unsupported_declarations() {
+        for source in [r#"[{"from":"/:id","params":{"id":"a","id":"b"},"to":"/x"}]"#,r#"[{"from":"/:id","params":{"missing":"a"},"to":"/x"}]"#,r#"[{"from":"/:id","params":{"id":"a+"},"to":"/x"}]"#,r#"[{"from":"/:id","from":"/:other","params":{"id":"a"},"to":"/x"}]"#,r#"[{"from":"/:id/:id","params":{"id":"a"},"to":"/x"}]"#] {assert!(parse(source).is_err(),"{source}");}
+        for source in [r#"[{"from":"/:id","params":{"id":"[a-z]{2}"},"to":"/:id?again=1"}]"#,r#"[{"from":"/a/:id","params":{"id":"[a-z]{2}"},"to":"/b/:id"},{"from":"/b/:id","params":{"id":"[a-z]{2}"},"to":"/a/:id"}]"#] {
+            let rules=parse(source).unwrap();assert!(validate(&rules,&[],&|_|true).iter().any(|(m,_)|m.contains("loop")));
+        }
+        let loops=parse(r#"[{"from":"/x","to":"/y"},{"from":"/y","to":"/x"}]"#).unwrap();
+        assert!(validate(&loops,&[],&|_|false).iter().any(|(m,_)|m.contains("loop")));
+    }
+}
+
+#[cfg(test)]
+mod wire_constraint_tests {
+    use super::*;
+    #[test]
+    fn dev_uses_wire_only_for_explicit_rule_constraints_and_retains_wire_canonicalization() {
+        let constrained=parse(r#"[{"from":"/:code","params":{"code":"[2-9a-z]{7}"},"to":"/items/:code"}]"#).unwrap();
+        assert_eq!(resolve_request(&constrained,&Policy::default(),"/2abcdef","/%32abcdef","",None),None);
+        assert_eq!(resolve_request(&constrained,&Policy::default(),"/2abcdef/","/%32abcdef/","?q=one",None),Some(("/%32abcdef?q=one".into(),301)));
+        let legacy=parse(r#"[{"from":"/:code","to":"/items/:code"}]"#).unwrap();
+        assert_eq!(resolve_request(&legacy,&Policy::default(),"/2abcdef","/%32abcdef","",None),Some(("/items/2abcdef".into(),301)));
     }
 }

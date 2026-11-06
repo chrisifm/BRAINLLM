@@ -1,0 +1,28 @@
+{
+  "id": "per-view-quality-evidence",
+  "kind": "capability",
+  "title": "Per-view review actions from actual evidence",
+  "why": "Existing quality/build/save engines project bounded dependency-aware findings and actual artifact bytes into per-view review actions. They do not judge screenshots, synthesize images/pages or infer browser speed.",
+  "changelog": [
+    "Per-view quality recommendations reuse real build and save evidence"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "apis": [
+    "brain quality refresh",
+    "brain_quality"
+  ],
+  "affects": [
+    "package.json"
+  ],
+  "adopt": {
+    "file": "package.json",
+    "snippet": "{\"scripts\":{\"quality:refresh\":\"brain quality refresh --json\"}}",
+    "command": "brain quality refresh --json"
+  },
+  "uses": [
+    {
+      "glob": "package.json",
+      "contains": "brain quality"
+    }
+  ]
+}

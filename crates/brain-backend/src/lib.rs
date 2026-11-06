@@ -7,6 +7,7 @@ macro_rules! log_line {
 }
 
 pub mod analytics;
+pub mod vitals;
 pub mod api_keys;
 pub mod audit;
 pub mod auth;
@@ -20,11 +21,14 @@ pub mod contract;
 pub mod contract_review;
 pub mod credits;
 pub mod db;
+pub mod database_audit;
 pub mod defaults;
+pub mod backfill;
 pub mod dev_trace;
 pub mod domain;
 pub mod schedules;
 pub mod apple;
+pub mod apple_native;
 pub mod google;
 pub mod http;
 pub mod jobs;

@@ -81,3 +81,18 @@ Regression coverage includes source-line precision, preservation of generated
 coordinates, duplicate file names, unavailable maps, cyclic/deep causes, bounded
 frames and ancestry, URL redaction, inspector propagation, mapping concurrency,
 deadlines, abort delivery and continued operation of existing fallbacks.
+## Generic error documents and language
+
+An authored `_error.brain` or status document keeps priority. Without one, the Node SSR fallback keeps
+the app's declared default language (`i18n.default`, `brain.json.lang`, then literal `app.brain` lang)
+or the matched route's locale. Optional flat dictionary keys `http.error.title`, `http.error.message`,
+`http.error.reference` and `http.error.home` customize its public generic text. Only these explicit
+keys enter the fallback metadata; never put exception details or secrets there. Each string is at
+most 2,048 bytes and rendered as escaped plain text. Invalid, non-string or oversized entries are
+excluded and use the English fallback.
+
+Missing translations use the English defaults and mark those fragments as English within the app's
+document language. RTL language tags retain document direction. The fallback uses a small same-origin
+stylesheet, preserves CSP, request references and no-store/noindex, and never reflects a private error
+or the request's query. JSON/API failures keep their existing status and transport. Compiler attribution
+follows the explicit project policy. Changing a public fallback message changes the build signature.

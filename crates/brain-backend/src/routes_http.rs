@@ -34,11 +34,15 @@ impl State {
             return Err(format!("Declare at most {} routes", crate::routes::MAX_ROUTES));
         }
         let available = handlers.as_ref().map(|h| h.names()).unwrap_or_default();
+        let verifiers = handlers.as_ref().map(|h| h.verifiers()).unwrap_or_default();
         let mut seen = Vec::new();
         let mut deadlines = HashMap::new();
         for route in routes {
             if !available.contains(&route.name) {
                 return Err(format!("route `{}` has no compiled handler; add server/routes/{}/handler.jsbrain", route.name, route.name));
+            }
+            if route.verify.as_ref().is_some_and(crate::routes::Verifier::is_custom) && !verifiers.contains(&route.name) {
+                return Err(format!("route `{}` has no compiled custom verifier; add server/routes/{}/verify.jsbrain with a callable default export",route.name,route.name));
             }
             if let Access::Roles(list) = &route.access {
                 if let Some(role) = list.iter().find(|r| !roles.contains(r)) {
@@ -111,6 +115,8 @@ async fn limit(app: &App, state: &State, route: &str, subject: &str, rate: &crat
 }
 
 async fn serve(app: App, state: Arc<State>, route: Arc<Route>, req: Request) -> Result<Response> {
+    let deadline = tokio::time::Instant::now() + route.timeout;
+    let custom = route.verify.as_ref().is_some_and(crate::routes::Verifier::is_custom);
     // Fails closed before anything looks at the request: a sender keeps retrying and no handler runs unverified.
     if route.disabled {
         return Ok(with_retry(error(StatusCode::SERVICE_UNAVAILABLE, "ROUTE_DISABLED", "This route's secret is not configured on the server; retry after the Retry-After delay").into_response(), 300));
@@ -128,6 +134,8 @@ async fn serve(app: App, state: Arc<State>, route: Arc<Route>, req: Request) -> 
         app.require_captcha(&format!("route:{}", route.name), &parts.headers, parts.extensions.get::<ClientIp>().map(|c| c.0)).await?;
     }
     let user = match &route.access {
+        // Provider verification never acquires a browser identity from an incidental cookie or Bearer token.
+        Access::Public if custom => None,
         Access::Public => app.user(&parts.headers).await.ok().flatten(),
         Access::SignedIn => Some(app.required(&parts.headers).await?),
         Access::Internal(internal) => {
@@ -204,8 +212,37 @@ async fn serve(app: App, state: Arc<State>, route: Arc<Route>, req: Request) -> 
     let raw = to_bytes(body, route.body_limit)
         .await
         .map_err(|_| error(StatusCode::PAYLOAD_TOO_LARGE, "BODY_TOO_LARGE", "Send a smaller body; this route declares its bodyLimit"))?;
+    let (raw_body, encoding) = if route.raw_body {
+        match std::str::from_utf8(&raw) {
+            Ok(text) => (json!(text), json!("utf8")),
+            Err(_) => (json!(crate::routes::encode_base64(&raw)), json!("base64")),
+        }
+    } else { (Value::Null, Value::Null) };
+    if custom && route.headers.iter().any(|name|parts.headers.get_all(name.as_str()).iter().count()>1) {
+        return Err(error(StatusCode::BAD_REQUEST,"VERIFICATION_HEADERS_INVALID","Send each declared verification header once; duplicate values are ambiguous"));
+    }
+    let headers: Map<String, Value> = route.headers.iter()
+        .filter_map(|name| parts.headers.get(name.as_str()).and_then(|v| v.to_str().ok()).map(|v| (name.clone(), json!(v))))
+        .collect();
+    let handlers = state.handlers.as_ref().ok_or_else(|| Error::internal("route handlers missing"))?;
     let mut verified = Value::Null;
-    if let Some(verifier) = &route.verify {
+    if custom {
+        let context=json!({"rawBody":raw_body,"rawBodyEncoding":encoding,"headers":headers});
+        let remaining=deadline.saturating_duration_since(tokio::time::Instant::now());
+        let result=if remaining.is_zero() {Err(RouteFailure::Timeout)} else {
+            tokio::time::timeout_at(deadline,handlers.verify(&route.name,context,remaining)).await.unwrap_or(Err(RouteFailure::Timeout))
+        };
+        match result {
+            Ok(true) => verified=json!({"scheme":"custom"}),
+            Ok(false) => {
+                crate::log_line!("{}",json!({"schemaVersion":1,"event":"route-signature-rejected","route":route.name,"reason":"custom","rid":rid,"valuesCaptured":false}));
+                return Err(error(StatusCode::UNAUTHORIZED,"SIGNATURE_INVALID","The custom verifier did not accept the exact raw request; inspect its declared headers and provider verification contract"));
+            }
+            Err(RouteFailure::Timeout) => return Err(error(StatusCode::GATEWAY_TIMEOUT,"ROUTE_TIMEOUT","Verification and the route handler must finish within the route timeout")),
+            Err(RouteFailure::Capacity) => return Ok(with_retry(error(StatusCode::SERVICE_UNAVAILABLE,"OVERLOADED","All route verification workers are busy; retry after the Retry-After delay").into_response(),1)),
+            Err(_) => return Err(error(StatusCode::SERVICE_UNAVAILABLE,"VERIFIER_UNAVAILABLE","The custom verifier could not complete; retry later and inspect private server diagnostics")),
+        }
+    } else if let Some(verifier) = &route.verify {
         let header = parts.headers.get(verifier.header.as_str()).and_then(|v| v.to_str().ok());
         match verifier.verify(header, &raw, unix_now()) {
             Ok(timestamp) => verified = json!({"header": verifier.header, "timestamp": timestamp}),
@@ -235,19 +272,6 @@ async fn serve(app: App, state: Arc<State>, route: Arc<Route>, req: Request) -> 
         }
         value
     };
-    let (raw_body, encoding) = if route.raw_body {
-        match std::str::from_utf8(&raw) {
-            Ok(text) => (json!(text), json!("utf8")),
-            Err(_) => (json!(crate::routes::encode_base64(&raw)), json!("base64")),
-        }
-    } else {
-        (Value::Null, Value::Null)
-    };
-    let headers: Map<String, Value> = route
-        .headers
-        .iter()
-        .filter_map(|name| parts.headers.get(name.as_str()).and_then(|v| v.to_str().ok()).map(|v| (name.clone(), json!(v))))
-        .collect();
     let context = json!({
         "rid": rid,
         "route": route.name,
@@ -263,15 +287,15 @@ async fn serve(app: App, state: Arc<State>, route: Arc<Route>, req: Request) -> 
         "rawBodyEncoding": encoding,
         "verified": verified,
     });
-    let handlers = state.handlers.as_ref().ok_or_else(|| Error::internal("route handlers missing"))?;
     let mut context = context;
     if let Some(who) = &route.run_as {
         context["$runAs"] = json!(who);
     }
-    let outcome = match tokio::time::timeout(route.timeout, handlers.run(&route.name, context, route.timeout)).await {
+    let remaining=deadline.saturating_duration_since(tokio::time::Instant::now());
+    let outcome = if remaining.is_zero() {Err(RouteFailure::Timeout)} else {match tokio::time::timeout_at(deadline, handlers.run(&route.name, context, remaining)).await {
         Ok(outcome) => outcome,
         Err(_) => Err(RouteFailure::Timeout),
-    };
+    }};
     match outcome {
         Ok(value) => respond(value).ok_or_else(|| invalid_status(&route.name, &rid)),
         Err(RouteFailure::Status(status, body)) => {

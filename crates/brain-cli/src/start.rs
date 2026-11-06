@@ -132,6 +132,9 @@ struct Kid {
     child: Child,
     started: Instant,
     ready: Arc<AtomicBool>,
+    /// Build snapshot at spawn, never re-read after this child exits.
+    warmup_configured: bool,
+    warmup_failures: u8,
     /// Why the supervisor itself stopped this child (`memory`, `unhealthy`): such exits are not crashes.
     why: Option<&'static str>,
     /// When SIGTERM was first sent: a child still running `DRAIN` later gets SIGKILL.
@@ -141,7 +144,33 @@ struct Kid {
 /// Grace period between SIGTERM and SIGKILL, the same one the stop path gives.
 const DRAIN: Duration = Duration::from_secs(12);
 
+/// Startup metadata is bounded and cannot follow an output-directory symlink.
+fn child_warmup_configured(root: &Path) -> std::io::Result<bool> {
+    const CAP: u64 = 16 * 1024 * 1024;
+    let invalid = || std::io::Error::new(std::io::ErrorKind::InvalidData, "Cannot read bounded built startup metadata; rebuild dist before starting it");
+    for relative in ["dist", "dist/_server", "dist/_server/manifest.json"] {
+        match std::fs::symlink_metadata(root.join(relative)) {
+            Ok(meta) if meta.file_type().is_symlink() => return Err(invalid()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+            _ => {},
+        }
+    }
+    let path = root.join("dist/_server/manifest.json");
+    let meta = std::fs::symlink_metadata(&path)?;
+    if !meta.is_file() || meta.len() > CAP { return Err(invalid()); }
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?.take(CAP + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > CAP { return Err(invalid()); }
+    let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_|invalid())?;
+    Ok(value.get("server").and_then(|server|server.get("warmup")).is_some())
+}
+fn consecutive_warmup_failures(configured: bool, ready: bool, previous: u8) -> u8 {
+    if configured && !ready { previous.saturating_add(1) } else { 0 }
+}
+
 fn spawn_child(root: &Path, fd: i32, vars: &[(String, String)], log: &Arc<Mutex<Log>>) -> std::io::Result<Kid> {
+    let warmup_configured = child_warmup_configured(root)?;
     let node = std::env::var("BRAIN_NODE").unwrap_or_else(|_| "node".into());
     let mut cmd = Command::new(node);
     // the worker exits when its supervisor is gone (killed with SIGKILL, OOM): its parent pid changes. Otherwise an
@@ -185,7 +214,7 @@ fn spawn_child(root: &Path, fd: i32, vars: &[(String, String)], log: &Arc<Mutex<
             }
         });
     }
-    Ok(Kid { child, started: Instant::now(), ready, why: None, termed: None })
+    Ok(Kid { child, started: Instant::now(), ready, warmup_configured, warmup_failures:0, why: None, termed: None })
 }
 
 fn term(k: &mut Kid) {
@@ -598,7 +627,9 @@ fn supervise(root: &Path, o: &Opts, listener: TcpListener, log: &Arc<Mutex<Log>>
             let planned = kids[i].why;
             // a signal the supervisor did not send (kill -9, the OOM killer) is not a crash of the app's code, ready or not:
             // a worker killed between listening and printing brain:ready must not count toward the crash loop
-            let external = st.code().is_none();
+            let early_warmup = kids[i].warmup_configured && !was_ready;
+            let warmup_failures = consecutive_warmup_failures(kids[i].warmup_configured, was_ready, kids[i].warmup_failures);
+            let external = st.code().is_none() && !early_warmup;
             let why: String = match planned {
                 Some(w) => w.into(),
                 None if external => format!("killed from outside ({})", exit_text(&st)),
@@ -607,6 +638,13 @@ fn supervise(root: &Path, o: &Opts, listener: TcpListener, log: &Arc<Mutex<Log>>
             };
             status.lock().unwrap().last_exit = Some((code, why.clone()));
             event(log, "exit", &format!(",\"code\":{code},\"reason\":{}", brain_serve::json_str(&why)));
+            // Three consecutive pre-ready warmup failures are terminal even when a single attempt takes
+            // longer than the ordinary 60-second crash window. A watchdog signal is an owned startup failure.
+            if warmup_failures >= 3 {
+                event(log, "warmup-startup-failed", ",\"failures\":3");
+                kids.append(&mut draining);
+                return give_up(&mut kids, "startup data warmup failed three consecutive times before readiness");
+            }
             if planned.is_none() && !external {
                 recent.retain(|t| t.elapsed() < Duration::from_secs(60));
                 recent.push(Instant::now());
@@ -628,7 +666,8 @@ fn supervise(root: &Path, o: &Opts, listener: TcpListener, log: &Arc<Mutex<Log>>
                 break;
             }
             match spawn_child(root, fd, &vars, log) {
-                Ok(k) => {
+                Ok(mut k) => {
+                    k.warmup_failures = if k.warmup_configured { warmup_failures } else { 0 };
                     kids[i] = k;
                     restarts.fetch_add(1, Ordering::SeqCst);
                     let mut s = status.lock().unwrap();
@@ -808,6 +847,31 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn startup_warmup_failures_have_a_consecutive_bound_independent_of_time_windows() {
+        assert_eq!(consecutive_warmup_failures(false,false,2),0);
+        assert_eq!(consecutive_warmup_failures(true,true,2),0);
+        let mut failures=0;
+        for expected in 1..=3 { failures=consecutive_warmup_failures(true,false,failures); assert_eq!(failures,expected); }
+    }
+    #[test]
+    fn startup_warmup_snapshot_is_bounded_and_does_not_follow_symlinks() {
+        let root=std::env::temp_dir().join(format!("brain-start-warmup-snapshot-{}",std::process::id()));
+        let _=std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("dist/_server")).unwrap();
+        let path=root.join("dist/_server/manifest.json");
+        assert!(!child_warmup_configured(&root).unwrap());
+        std::fs::write(&path,r#"{"server":{"warmup":{"paths":["/data"]}}}"#).unwrap();
+        assert!(child_warmup_configured(&root).unwrap());
+        std::fs::write(&path,"{}").unwrap(); assert!(!child_warmup_configured(&root).unwrap());
+        let file=std::fs::OpenOptions::new().write(true).open(&path).unwrap(); file.set_len(16*1024*1024+1).unwrap(); drop(file);
+        assert!(child_warmup_configured(&root).is_err());
+        std::fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink(root.join("dist/index.html"),&path).unwrap();
+        assert!(child_warmup_configured(&root).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn memory_sizes() {

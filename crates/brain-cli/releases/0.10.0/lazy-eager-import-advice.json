@@ -1,0 +1,31 @@
+{
+  "id": "lazy-eager-import-advice",
+  "kind": "change",
+  "title": "Mixed eager/lazy component imports",
+  "why": "B0225 warns when the same imported component is used both eagerly and lazily, with lexical scope awareness. It does not remove deferred bytes from the conservative route budget.",
+  "changelog": [
+    "B0225 warns about mixed eager and lazy uses of the same component"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "apis": [
+    "lazy"
+  ],
+  "affects": [
+    "views/**",
+    "comp/**"
+  ],
+  "codes": [
+    "B0225"
+  ],
+  "steps": [
+    "Use consistent lazy loading where appropriate, or retain the intentional eager use and its full reachable budget."
+  ],
+  "finds": [
+    {
+      "glob": "views/**"
+    },
+    {
+      "glob": "comp/**"
+    }
+  ]
+}

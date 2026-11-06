@@ -1,0 +1,12 @@
+[
+  {
+    "code": "B1303",
+    "file": "invalid/comp/b1303-nested-traversal.brain",
+    "line": 5,
+    "col": 5,
+    "msg": "A nested for-of traverses the same stable collection as its enclosing loop.",
+    "fix": "Review an index or Map when repeated lookups can preserve ordering, duplicate handling and side effects. This syntax alone does not prove runtime complexity or permit an automatic rewrite.",
+    "level": "warning",
+    "edits": []
+  }
+]

@@ -280,6 +280,7 @@ impl Tracker {
             ("ms", Json::Num(t0.elapsed().as_millis() as f64)),
         ])
         .stringify();
+        let rec = crate::quality_views::enrich_impact(&rec);
         if st.records.len() >= KEEP {
             st.records.pop_front();
         }

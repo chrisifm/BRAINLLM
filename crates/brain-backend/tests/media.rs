@@ -72,7 +72,8 @@ async fn originals_versions_library_metadata_owner_isolation_and_durable_cleanup
         .unwrap();
     let http = brain_backend::http::router(
         pool.clone(),
-        brain_backend::Config { api_keys: None,
+        brain_backend::Config { vitals: None,
+        api_keys: None,
             roles: Default::default(),
             mail: None,
             auth_public_base_url: None,
@@ -83,7 +84,7 @@ async fn originals_versions_library_metadata_owner_isolation_and_durable_cleanup
             origins: vec!["https://media.example.test".into()],
             production: true,
             jwt: None,
-            google: None, apple: None, linkedin: None,
+            google: None, apple: None, apple_native: None, linkedin: None,
             gcs: None,
         },
     )

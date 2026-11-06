@@ -74,6 +74,7 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [BRAINLLM messaging](BRAND.md) | — |
 | [Browser compatibility evidence](BROWSER-COMPATIBILITY.md) | The compatibility table is generated from the official `web-features` dataset. |
 | [Native browser data and threads](BROWSER-DATA.md) | Use small public URL state for navigation, IndexedDB for structured cache records, and optional official SQLite Wasm inside an owned worker when a relational l… |
+| [Browser defaults for generated themes](BROWSER-DEFAULTS.md) | New projects include conservative print and forced-color rules in the low-priority reset layer of `tokens.cssbrain`. |
 | [Capabilities](CAPABILITIES.md) | What an app author can use, generated from the tables the compiler dispatches on. |
 | [Concurrent source changes](CHANGES.md) | The change API coordinates agents through file leases, exact revisions and checked plans. |
 | [Compatible warning diagnostics in 0.4](CHECKER-COMPATIBILITY.md) | A recognized name does not guarantee browser support or execution checkpoints. |
@@ -89,10 +90,12 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [Native backend on the frontend development origin](DEV-NATIVE-BACKEND.md) | Set `BRAIN_BACKEND_URL=http://127.0.0.1:8000` in the private resolved development environment to connect an explicitly running native backend. |
 | [Native sockets through the Rust frontend](DEV-NATIVE-SOCKETS.md) | The Rust development server and static production gateway can forward the native `/_brain/socket` endpoint to a fixed loopback backend. |
 | [Development worker resource failures](DEV-RESOURCE-FAILURES.md) | The development server retains its 64-connection admission limit. |
+| [Observe and plan edge caching](EDGE.md) | `brain edge plan --json` reads the current build and produces a read-only cache plan. |
 | [Runtime error traces](ERROR-TRACES.md) | `brain-err.js` captures observed render, reactive, handler and global failures. |
 | [Improving BRAINLLM while using it](EVOLUTION.md) | An LLM that finds a compiler bug, a repeated workflow failure, or a measurable performance opportunity may fix the framework. |
 | [Compiler-selected form capabilities](FORM-CAPABILITIES.md) | The author-facing `form(schema, options)` API is unchanged. |
 | [Native form validation](FORM-VALIDATION.md) | `brain-schema.js` is the shared rule implementation for browser forms, API shape validation and Node form posts. |
+| [Explicit Google event bridge](GOOGLE-ANALYTICS.md) | Google Analytics or Tag Manager is optional. |
 | [Exact static fragment HMR](HMR-FRAGMENTS.md) | Development output can patch a changed static text node or safe static attribute without replacing the component's DOM, effects, handlers, owner or named signa… |
 | [HTTP responses and safe error defaults](HTTP-RESPONSES.md) | The Rust resource backend and the Node production server supply error responses when no application page handles the failure. |
 | [Official SDK integrations](INTEGRATIONS.md) | The integration catalog discovers maintained official SDKs and prepares selective revision-checked plans. |
@@ -117,10 +120,14 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [Private project manifests](PROJECT-MANIFESTS.md) | Project manifests make component contracts available to agents without returning source bodies or running application code. |
 | [Persistent agent quality feedback](QUALITY.md) | The primary interface is structured JSON through `quality::query(root, options)`. |
 | [Product-flow recipes](RECIPES.md) | `brain recipe` prepares files for review. |
+| [Optional shared public SSR cache](REDIS-CACHE.md) | The Node production server can share public `<meta cache="N">` page results through standalone Redis. |
 | [Native resource generation](RESOURCE-GENERATION.md) | `brain add resource posts --fields 'title:str! body:str' --json` creates native backend contracts and executable client/server helpers offline. |
+| [Frontend route parameter constraints](ROUTE-CONSTRAINTS.md) | Opt in to a bounded raw-segment constraint in `brain.json`. |
 | [Runtime execution and resource budgets](RUNTIME-BUDGETS.md) | Production and development compiled BrainScript functions have execution checkpoints. |
+| [Optional browser error reporting](SENTRY.md) | BRAINLLM can forward consented browser errors to Sentry through its existing Node/SSR server, without a third-party browser SDK. |
 | [Site-level SEO: focus terms and published URLs](SEO-SITE.md) | Both are optional; without them nothing changes. |
 | [Public website](SITE.md) | The landing lives in `docs/site/`. |
+| [Explicit startup data warmup](STARTUP-WARMUP.md) | Production already imports its server modules before readiness. |
 | [Upgrading](UPGRADING.md) | What breaks between versions and how to preview a package pin change; `brain upgrade` measures it against your app. |
 | [Viewer browser E2E lane](VIEWER-E2E.md) | This lane is opt-in. |
 | [Native webhooks](WEBHOOKS.md) | The Rust backend accepts signed inbound work and explicitly enqueues outbound deliveries. |
@@ -135,12 +142,14 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [Project API keys](backend/api-keys.md) | A project can issue its own API keys so other services, scripts and partners call the resource API without a browser session. |
 | [Atomic updates: guarded increments, compare-and-set and upserts](backend/atomic-updates.md) | Read-modify-write from the client (`GET`, change, `PUT`) loses updates under concurrency. |
 | [Audit log](backend/audit.md) | `audit: true` in a resource's `policy.jsbrain` records every insert, update and delete of its rows, whichever path wrote them. |
+| [Computed data backfills](backend/backfills.md) | `brain data backfill` fills an absent field in existing rows using a bounded deterministic expression. |
 | [Batch writes](backend/batch.md) | `POST /api/<resource>/batch` creates, updates, upserts or deletes many records in ONE transaction. |
-| [HTTP caching and conditional requests](backend/caching.md) | Every successful `GET /api/...` response carries an `ETag`. |
+| [HTTP caching and conditional requests](backend/caching.md) | This page describes native resource HTTP caching. |
 | [Captcha on public writes](backend/captcha.md) | Requires a verified token before a protected public write runs. |
 | [Running several backend processes](backend/cluster.md) | One `brain backend serve` process keeps two kinds of state in its own memory: rate-limit windows and the socket event fan-out. |
 | [Credits](backend/credits.md) | A balance per subject (a user or an organization) and an append-only ledger that explains it. |
 | [Cron schedules (single run per slot)](backend/cron.md) | `server/cron/<name>.jsbrain` enqueues a declared job on a cron schedule. |
+| [Read-only database audit](backend/database-audit.md) | `brain db audit [--env development] [--limit 50] [--json]` observes the current app's configured `DATABASE_URL`. |
 | [Facets](backend/facets.md) | Counts of each value of a field over the rows the reader may list, for filter sidebars. |
 | [File uploads of any type (native backend)](backend/files.md) | Declared file buckets hold the content types they list (PDF, Word, spreadsheets, zip, audio, video, images, plain text), stream the body to private disk withou… |
 | [Filters (B-11)](backend/filters.md) | List endpoints accept only the filters a resource declares in `query.jsbrain`. |
@@ -166,4 +175,5 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [State machines (declared transitions)](backend/state-machines.md) | A resource may declare one `enum` field as its state. |
 | [Multi-resource transactions (operations)](backend/transactions.md) | An operation is a server-side write that spans several records or resources. |
 | [Field visibility (B-20)](backend/visibility.md) | A field can be restricted to some readers with `visible`. |
+| [Native document-performance aggregates](backend/vitals.md) | Native vitals is an independent opt-in collector for an app's existing native PostgreSQL backend and ordinary Node/SSR build. |
 | [Signed webhook routes](backend/webhooks.md) | Payment and shipping providers call your backend and sign the exact request bytes. |

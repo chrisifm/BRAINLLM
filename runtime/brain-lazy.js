@@ -29,8 +29,11 @@ function reloadOnce() {
 function visible(el, go) {
   const box = { go }
   const io = new IntersectionObserver(es => es.some(e => e.isIntersecting) && box.go?.(), { rootMargin: '200px' })
+  const doc = el.ownerDocument || G.document
+  const hidden = () => { if (doc?.visibilityState === 'hidden') box.go?.() }
+  doc?.addEventListener('visibilitychange', hidden)
   io.observe(el)
-  return () => { box.go = null; io.disconnect() }
+  return () => { box.go = null; io.disconnect(); doc?.removeEventListener('visibilitychange', hidden) }
 }
 
 export function lazy(el, imp, mode, props = {}) {

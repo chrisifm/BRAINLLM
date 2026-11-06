@@ -1,0 +1,12 @@
+[
+  {
+    "code": "B1305",
+    "file": "invalid/comp/b1305-each-traversal.brain",
+    "line": 6,
+    "col": 14,
+    "msg": "A collection traversal appears inside each-item rendering without a reference to the item's bound names.",
+    "fix": "If reads are stable and the computation is effect-free, derive the shared value outside the each block. Unknown purity, getters and changing external state still require review; no hoist is applied.",
+    "level": "warning",
+    "edits": []
+  }
+]

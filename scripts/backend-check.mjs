@@ -9,9 +9,9 @@ import { createHmac, randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { hasDoctorAdvice } from './gates/doctor-observation.mjs'
 const project = fileURLToPath(new URL('../', import.meta.url))
-const targets=['session_controls','analytics','api_keys','backend','caching','cluster','data_queries','domain_writes','edge','exact_types','files','imports','foundation','jwt_sessions','links','media','native_openapi','production_shape','query_shape','routes','auth_flows','auth_http','native_sockets','organizations','queues','row_policy','security_matrix','system_keys']
+const targets=['vitals','session_controls','analytics','api_keys','backend','caching','cluster','data_queries','domain_writes','edge','exact_types','files','imports','foundation','jwt_sessions','links','media','native_openapi','production_shape','query_shape','routes','auth_flows','auth_http','native_sockets','organizations','queues','row_policy','security_matrix','system_keys']
 // Release gates that drive the real binary over real sockets (scripts/gates/<name>.mjs); selectable like a test target.
-const gates=['http-truth-table','failure-logs']
+const gates=['native-vitals','http-truth-table','failure-logs','captcha-joint','session-boundary','job-diagnostics','custom-route-verifier','database-audit','edge-audit','named-aggregates','redis-cache','computed-backfill']
 // A module missing from `targets` could not be selected and would silently run in every focused pass of another target.
 const declared=[...readFileSync(join(project,'crates/brain-backend/tests/integration.rs'),'utf8').matchAll(/^mod (\w+);/gm)].map(match=>match[1])
 const unlisted=[...declared.filter(name=>!targets.includes(name)),...targets.filter(name=>!declared.includes(name))]
@@ -215,23 +215,25 @@ try {
       const app=join(dir,'migration-boundary')
       cli(['add','resource','sample','--fields','title:str!','--json'],app)
       cli(['backend','migrate','--json'],app)
-      const previous=()=>sql('ALTER TABLE public._brain_users DROP COLUMN display_name, DROP COLUMN picture_url; DELETE FROM public._brain_migrations WHERE version=27')
+      const previous=()=>sql('ALTER TABLE public._brain_users DROP COLUMN display_name, DROP COLUMN picture_url; ALTER TABLE public._brain_auth_challenges DROP CONSTRAINT _brain_auth_challenges_audience_check, DROP COLUMN audience; DROP TABLE public._brain_vitals_daily, public._brain_vitals_capacity, public._brain_data_backfills, public._brain_backfill_identity; DELETE FROM public._brain_migrations WHERE version IN (27,28,29,30)')
       const check=(report,applied,after)=>{
         const state=report.frameworkMigration
-        if(state?.phase!=='before-apply'||state.installed!==26||state.pending?.[0]?.version!==27||state.applied!==applied||state.installedAfter!==after||state.pendingAfter?.length!==(applied?0:1))throw Error('Framework migration result must distinguish its plan and observed outcome')
+        if(state?.phase!=='before-apply'||state.installed!==26||JSON.stringify(state.pending?.map(item=>item.version))!==JSON.stringify([27,28,29,30])||state.applied!==applied||state.installedAfter!==after||state.pendingAfter?.length!==(applied?0:4))throw Error('Framework migration result must distinguish its plan and observed outcome')
       }
       previous()
       check(cli(['backend','approve-contract','--json'],app),false,26)
       if(sql('SELECT max(version) FROM public._brain_migrations')!=='26')throw Error('Read-only framework preview applied SQL')
       const applied=cli(['backend','approve-contract','--apply','--json'],app)
-      check(applied,true,27)
+      check(applied,true,30)
       if(applied.applied!==false||!lastStderr.includes('MIGRATION_ROLLBACK_BOUNDARY'))throw Error('Framework-only apply needs a separate outcome and advance warning')
       const repeated=cli(['backend','approve-contract','--apply','--json'],app).frameworkMigration
-      if(repeated.applied!==false||repeated.installed!==27||repeated.installedAfter!==27||repeated.pendingAfter.length!==0)throw Error('Repeated framework apply must report no advancement')
+      if(repeated.applied!==false||repeated.installed!==30||repeated.installedAfter!==30||repeated.pendingAfter.length!==0)throw Error('Repeated framework apply must report no advancement')
       previous()
       writeFileSync(join(app,'server/resources/sample/schema.jsbrain'),"<meta server>\nexport default { title: 'str!', note: 'str' }\n")
+      const refused=spawnSync(binary,['backend','migrate','--json'],{cwd:app,env:cliEnv,encoding:'utf8',timeout:30000,maxBuffer:65536})
+      if(refused.status===0||!((refused.stdout||'')+(refused.stderr||'')).includes('even optional additions require explicit approval'))throw Error('Optional contract additions must explain their explicit approval boundary')
       check(cli(['backend','approve-contract','--only','sample','--json'],app),false,26)
-      check(cli(['backend','approve-contract','--only','sample','--apply','--json'],app),true,27)
+      check(cli(['backend','approve-contract','--only','sample','--apply','--json'],app),true,30)
       console.log('Backend CLI framework migration smoke: PASS (read-only preview, framework-only apply, explicit outcome, idempotence and selected-resource apply)')
     }
     brain(['new','app','--json'],dir)

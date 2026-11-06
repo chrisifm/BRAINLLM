@@ -5,9 +5,202 @@
   "description": "BRAINLLM app configuration. Precedence: flag > BRAIN_* variable > brain.json > defaults.",
   "type": "object",
   "properties": {
-    "compilerBranding": { "type": "boolean", "default": true, "description": "Compiler attribution in production artifacts and headers. Set false only at the user's explicit request; removes generated visible/hidden signatures and compiler repository/landing links. Does not rewrite authored content or third-party licenses." },
+    "google": {
+      "type": "object",
+      "description": "Legacy tags remain compatible. Opt in to basic mode for a consent-gated declared-event bridge, strict per-environment destinations and optional banner; see docs/GOOGLE-ANALYTICS.md.",
+      "additionalProperties": false,
+      "properties": {
+        "analytics": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Legacy ID format remains compatible; basic mode applies the strict destination format."
+        },
+        "tagManager": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Legacy ID format remains compatible; basic mode applies the strict destination format."
+        },
+        "siteVerification": {
+          "type": "string"
+        },
+        "mode": {
+          "const": "basic"
+        },
+        "banner": {
+          "type": "boolean",
+          "default": false
+        },
+        "environments": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 20,
+          "propertyNames": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "analytics": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^G-[A-Z0-9]{1,32}$"
+              },
+              "tagManager": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^GTM-[A-Z0-9]{1,32}$"
+              }
+            },
+            "not": {
+              "required": [
+                "analytics",
+                "tagManager"
+              ],
+              "properties": {
+                "analytics": {
+                  "type": "string"
+                },
+                "tagManager": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "events": {
+          "type": "object",
+          "maxProperties": 100,
+          "propertyNames": {
+            "allOf": [
+              {
+                "pattern": "^[A-Za-z0-9_.:-]{1,64}$"
+              },
+              {
+                "not": {
+                  "enum": [
+                    "__proto__",
+                    "constructor",
+                    "prototype"
+                  ]
+                }
+              }
+            ]
+          },
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^(?!(?:[Gg][Aa]_|[Gg][Oo][Oo][Gg][Ll][Ee]_|[Ff][Ii][Rr][Ee][Bb][Aa][Ss][Ee]_))[A-Za-z][A-Za-z0-9_]{0,39}$"
+          }
+        },
+        "funnels": {
+          "type": "object",
+          "maxProperties": 20,
+          "propertyNames": {
+            "pattern": "^(?!(?:[Gg][Aa]_|[Gg][Oo][Oo][Gg][Ll][Ee]_|[Ff][Ii][Rr][Ee][Bb][Aa][Ss][Ee]_))[A-Za-z][A-Za-z0-9_]{0,39}$"
+          },
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "pattern": "^(?!(?:[Gg][Aa]_|[Gg][Oo][Oo][Gg][Ll][Ee]_|[Ff][Ii][Rr][Ee][Bb][Aa][Ss][Ee]_))[A-Za-z][A-Za-z0-9_]{0,39}$"
+            },
+            "uniqueItems": true
+          }
+        }
+      },
+      "if": {
+        "anyOf": [
+          {
+            "required": [
+              "mode"
+            ]
+          },
+          {
+            "required": [
+              "environments"
+            ]
+          },
+          {
+            "required": [
+              "events"
+            ]
+          },
+          {
+            "required": [
+              "funnels"
+            ]
+          },
+          {
+            "required": [
+              "banner"
+            ]
+          }
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "analytics",
+            "tagManager"
+          ],
+          "properties": {
+            "analytics": {
+              "type": "string"
+            },
+            "tagManager": {
+              "type": "string"
+            }
+          }
+        },
+        "properties": {
+          "analytics": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^G-[A-Z0-9]{1,32}$"
+          },
+          "tagManager": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^GTM-[A-Z0-9]{1,32}$"
+          }
+        }
+      }
+    },
+    "compilerBranding": {
+      "type": "boolean",
+      "default": true,
+      "description": "Compiler attribution in production artifacts and headers. Set false only at the user's explicit request; removes generated visible/hidden signatures and compiler repository/landing links. Does not rewrite authored content or third-party licenses."
+    },
+    "compilerBrandingScope": {
+      "type": "string",
+      "enum": [
+        "file",
+        "page"
+      ],
+      "default": "file",
+      "description": "file preserves attribution on generated browser JS/CSS. Explicit page scope keeps document comments, generator metadata, visible credit and build attribution without repeating comments in browser dependencies. Never select page or disable branding without the user's explicit request. Authored and third-party bytes retain their licenses."
+    },
     "output": {
-      "type": "string", "enum": ["auto", "static"], "default": "auto",
+      "type": "string",
+      "enum": [
+        "auto",
+        "static"
+      ],
+      "default": "auto",
       "description": "static requires portable .html/.js/.css output and rejects request-time server dependencies. Honored by build, doctor and MCP. auto preserves normal server selection."
     },
     "staticOutput": {
@@ -15,12 +208,45 @@
       "additionalProperties": false,
       "description": "Optional generated asset folders for static output only. Defaults preserve the normal layout. Paths are safe relative URL directories; . means the output root. Public originals retain their source paths; packaged SDKs preserve their complete layout beneath the js folder.",
       "properties": {
-        "host": { "type": "string", "enum": ["generic", "github-pages"], "default": "generic", "description": "github-pages emits a root .nojekyll and 404.html, requires the public HTTPS origin and defaults hostFiles to false. Set base separately for project repositories." },
-        "fonts": { "type": "string", "minLength": 1, "maxLength": 192, "description": "Hashed public/imported fonts; defaults to the assets directory unless explicitly overridden. Packaged SDK relative trees stay intact." },
-        "precompressed": { "type": "boolean", "default": true, "description": "Emit useful .gz/.br/.zst variants. false emits ordinary raw web files only; does not remove authored public files." },
-        "hostFiles": { "type": "boolean", "default": true, "description": "Emit optional _headers/_redirects and nginx/Caddy configuration hints. false requires configuring headers and redirects on the host." },
-        "compression": { "type": "string", "enum": ["small", "fast"], "default": "small", "description": "Precompression profile: small preserves production size optimization; fast spends less build time encoding gzip/Brotli/zstd. Both retain raw files, useful compressed variants and actual-byte budget checks." },
-        "inlineCss": { "type": "boolean", "default": true, "description": "Allow small stylesheets inline; false emits generated CSS as separate hashed files in the css folder. Dynamic style attributes are unaffected." },
+        "host": {
+          "type": "string",
+          "enum": [
+            "generic",
+            "github-pages"
+          ],
+          "default": "generic",
+          "description": "github-pages emits a root .nojekyll and 404.html, requires the public HTTPS origin and defaults hostFiles to false. Set base separately for project repositories."
+        },
+        "fonts": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 192,
+          "description": "Hashed public/imported fonts; defaults to the assets directory unless explicitly overridden. Packaged SDK relative trees stay intact."
+        },
+        "precompressed": {
+          "type": "boolean",
+          "default": true,
+          "description": "Emit useful .gz/.br/.zst variants. false emits ordinary raw web files only; does not remove authored public files."
+        },
+        "hostFiles": {
+          "type": "boolean",
+          "default": true,
+          "description": "Emit optional _headers/_redirects and nginx/Caddy configuration hints. false requires configuring headers and redirects on the host."
+        },
+        "compression": {
+          "type": "string",
+          "enum": [
+            "small",
+            "fast"
+          ],
+          "default": "small",
+          "description": "Precompression profile: small preserves production size optimization; fast spends less build time encoding gzip/Brotli/zstd. Both retain raw files, useful compressed variants and actual-byte budget checks."
+        },
+        "inlineCss": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow small stylesheets inline; false emits generated CSS as separate hashed files in the css folder. Dynamic style attributes are unaffected."
+        },
         "js": {
           "type": "string",
           "minLength": 1,
@@ -52,11 +278,32 @@
       "description": "`brain trace`, the development capture of `brain run`. It never reaches a production build.",
       "additionalProperties": false,
       "properties": {
-        "enabled": { "type": "boolean", "default": true },
-        "redact": { "type": "array", "items": { "type": "string" }, "description": "Extra field names to hide, on top of passwords, tokens, cookies and secrets" },
-        "maxBodyKB": { "type": "integer", "minimum": 1, "default": 16 },
-        "maxMB": { "type": "integer", "minimum": 1, "default": 64 },
-        "maxAgeHours": { "type": "integer", "minimum": 1, "default": 72 }
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "redact": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Extra field names to hide, on top of passwords, tokens, cookies and secrets"
+        },
+        "maxBodyKB": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 16
+        },
+        "maxMB": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 64
+        },
+        "maxAgeHours": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 72
+        }
       }
     },
     "$schema": {
@@ -90,12 +337,73 @@
     "server": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Limits shared by brain run and the production server (dist/server.mjs). BRAIN_MAX_BODY_KB, BRAIN_TIMEOUT_MS and BRAIN_RPC_LIMIT override them at run time. brain check reports an invalid value as B0707.",
+      "description": "Server request limits and explicit optional startup data warmup. The warmup deadline is independent of RPC/load request timeout.",
       "properties": {
-        "maxBodyKB": { "type": "integer", "minimum": 1, "maximum": 65536, "default": 1024, "description": "Largest RPC or form body in KiB (1024 bytes); a larger body is answered with 413. Raise it for files sent as base64 in RPC arguments." },
-        "timeoutMs": { "type": "integer", "minimum": 100, "maximum": 600000, "default": 10000, "description": "Deadline for a server function call and for load(); past it the server answers 504." },
-        "earlyHints": { "type": "boolean", "default": false, "description": "Send 103 Early Hints from the Node server. Leave off behind nginx below 1.29, which takes a 103 as the final response. Link headers are always sent. BRAIN_EARLY_HINTS=1 or 0 overrides it." },
-        "rpcPerMinute": { "type": "integer", "minimum": 1, "maximum": 100000, "default": 60, "description": "Calls per client IP and function per minute; past it the server answers 429 with Retry-After." }
+        "maxBodyKB": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536,
+          "default": 1024,
+          "description": "Largest RPC or form body in KiB (1024 bytes); a larger body is answered with 413. Raise it for files sent as base64 in RPC arguments."
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 600000,
+          "default": 10000,
+          "description": "Deadline for a server function call and for load(); past it the server answers 504."
+        },
+        "earlyHints": {
+          "type": "boolean",
+          "default": false,
+          "description": "Send 103 Early Hints from the Node server. Leave off behind nginx below 1.29, which takes a 103 as the final response. Link headers are always sent. BRAIN_EARLY_HINTS=1 or 0 overrides it."
+        },
+        "rpcPerMinute": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000,
+          "default": 60,
+          "description": "Calls per client IP and function per minute; past it the server answers 429 with Retry-After."
+        },
+        "warmup": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "paths"
+          ],
+          "description": "Opt-in production startup data reads. Exact public cached SSR routes only, anonymous read-only GET, at most two concurrent requests. Requires a known site origin. No headers, cookies, credentials, writes or external warmup URLs. Absent creates no data warmup requests.",
+          "properties": {
+            "paths": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 8,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "^/(?!/)"
+              },
+              "description": "Canonical public paths including base/locale; no query, hash, traversal, encoded separators, credentials or parameter patterns. Runtime/build enforce the exact route and 256-byte limit."
+            },
+            "timeoutMs": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 10000,
+              "default": 8000,
+              "description": "Absolute opt-in module/data warmup budget including abort and cleanup."
+            },
+            "onError": {
+              "type": "string",
+              "enum": [
+                "continue",
+                "abort"
+              ],
+              "default": "continue",
+              "description": "continue permits readiness after clean partial failures; abort rejects startup/reload. An overdue CPU task or incomplete cleanup is always fatal."
+            }
+          }
+        }
       }
     },
     "csp": {
@@ -107,7 +415,10 @@
           "type": "array",
           "maxItems": 64,
           "uniqueItems": true,
-          "items": { "type": "string", "pattern": "^(https://[a-z0-9.-]+|http://(localhost|127\\.0\\.0\\.1))(:([0-9]+|\\*))?$" },
+          "items": {
+            "type": "string",
+            "pattern": "^(https://[a-z0-9.-]+|http://(localhost|127\\.0\\.0\\.1))(:([0-9]+|\\*))?$"
+          },
           "description": "Exact hosts pages may load scripts from, besides the site's own. A literal script outside this list is reported as B0811; a third-party script tag still needs integrity (B0123)."
         },
         "mediaSrc": {
@@ -134,21 +445,30 @@
           "type": "array",
           "maxItems": 64,
           "uniqueItems": true,
-          "items": { "type": "string", "pattern": "^(https://(\\*\\.)?[a-z0-9.-]+|http://(localhost|127\\.0\\.0\\.1))(:([0-9]+|\\*))?$" },
+          "items": {
+            "type": "string",
+            "pattern": "^(https://(\\*\\.)?[a-z0-9.-]+|http://(localhost|127\\.0\\.0\\.1))(:([0-9]+|\\*))?$"
+          },
           "description": "Origins pages may embed in an iframe, besides the site's own. A literal iframe outside this list is reported as B0811."
         },
         "formAction": {
           "type": "array",
           "maxItems": 64,
           "uniqueItems": true,
-          "items": { "type": "string", "pattern": "^(https://[a-z0-9.-]+|http://(localhost|127\\.0\\.0\\.1))(:[0-9]+)?$" },
+          "items": {
+            "type": "string",
+            "pattern": "^(https://[a-z0-9.-]+|http://(localhost|127\\.0\\.0\\.1))(:[0-9]+)?$"
+          },
           "description": "Exact origins native forms may submit to, besides the own origin. HTTPS or local-loopback HTTP only; no wildcard, path, blob or socket sources. Omitted or [] keeps form-action own-origin only."
         },
         "connectSrc": {
           "type": "array",
           "maxItems": 64,
           "uniqueItems": true,
-          "items": { "type": "string", "pattern": "^((https|wss)://(\\*\\.)?[a-z0-9.-]+|(http|ws)://(localhost|127\\.0\\.0\\.1))(:([0-9]+|\\*))?$" },
+          "items": {
+            "type": "string",
+            "pattern": "^((https|wss)://(\\*\\.)?[a-z0-9.-]+|(http|ws)://(localhost|127\\.0\\.0\\.1))(:([0-9]+|\\*))?$"
+          },
           "description": "Origins pages may call besides the site's own, which is always allowed. Replaces the broad `https: wss:` of `connect-src`; [] means the own origin only. Omitted keeps the broad form and `brain check` warns B0795."
         }
       }
@@ -174,24 +494,36 @@
           "minItems": 1,
           "maxItems": 8,
           "uniqueItems": true,
-          "items": { "type": "string", "format": "uri", "pattern": "^https?://[^/@?#\\s]+$" },
+          "items": {
+            "type": "string",
+            "format": "uri",
+            "pattern": "^https?://[^/@?#\\s]+$"
+          },
           "description": "Canonical public HTTP(S) origins without path or trailing slash. Defaults to the origin of PUBLIC_SITE_URL. --origin replaces this list."
         },
         "sockets": {
           "description": "Absent/false disables native live resources. Every socket origin must also occur in the resolved HTTP origins; no implicit CORS expansion.",
           "oneOf": [
-            { "const": false },
+            {
+              "const": false
+            },
             {
               "type": "object",
               "additionalProperties": false,
-              "required": ["allowedOrigins"],
+              "required": [
+                "allowedOrigins"
+              ],
               "properties": {
                 "allowedOrigins": {
                   "type": "array",
                   "minItems": 1,
                   "maxItems": 8,
                   "uniqueItems": true,
-                  "items": { "type": "string", "format": "uri", "pattern": "^https?://[^/@?#\\s]+$" }
+                  "items": {
+                    "type": "string",
+                    "format": "uri",
+                    "pattern": "^https?://[^/@?#\\s]+$"
+                  }
                 }
               }
             }
@@ -224,7 +556,10 @@
           "default": 2048
         },
         "update": {
-          "enum": ["auto", "prompt"],
+          "enum": [
+            "auto",
+            "prompt"
+          ],
           "default": "auto",
           "description": "prompt: a new service worker waits until the page calls applyUpdate()"
         },
@@ -234,14 +569,44 @@
           "description": "Service worker strategies for same-origin data paths; first match wins",
           "items": {
             "type": "object",
-            "required": ["match", "strategy"],
+            "required": [
+              "match",
+              "strategy"
+            ],
             "additionalProperties": false,
             "properties": {
-              "match": { "type": "string", "pattern": "^/[^*?#\\s]*\\*?$" },
-              "strategy": { "enum": ["cache-first", "network-first", "stale-while-revalidate", "network-only"] },
-              "maxEntries": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 64 },
-              "maxAge": { "type": ["string", "integer"], "description": "30s, 10m, 1h, 7d or seconds; omitted = no age limit" },
-              "timeout": { "type": ["string", "integer"], "description": "network-first deadline, 1s to 60s (default 3s)" }
+              "match": {
+                "type": "string",
+                "pattern": "^/[^*?#\\s]*\\*?$"
+              },
+              "strategy": {
+                "enum": [
+                  "cache-first",
+                  "network-first",
+                  "stale-while-revalidate",
+                  "network-only"
+                ]
+              },
+              "maxEntries": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000,
+                "default": 64
+              },
+              "maxAge": {
+                "type": [
+                  "string",
+                  "integer"
+                ],
+                "description": "30s, 10m, 1h, 7d or seconds; omitted = no age limit"
+              },
+              "timeout": {
+                "type": [
+                  "string",
+                  "integer"
+                ],
+                "description": "network-first deadline, 1s to 60s (default 3s)"
+              }
             }
           }
         }
@@ -264,10 +629,26 @@
           "type": "object",
           "description": "Minimum score per category for `brain lighthouse`. Accessibility and SEO default to 100 because they depend only on the page; performance and best-practices are checked only when set.",
           "properties": {
-            "performance": { "type": "number", "minimum": 0, "maximum": 100 },
-            "accessibility": { "type": "number", "minimum": 0, "maximum": 100 },
-            "best-practices": { "type": "number", "minimum": 0, "maximum": 100 },
-            "seo": { "type": "number", "minimum": 0, "maximum": 100 }
+            "performance": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "accessibility": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "best-practices": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "seo": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            }
           }
         }
       }
@@ -276,7 +657,9 @@
       "type": "object",
       "properties": {
         "siteName": {
-          "type": "string", "minLength": 1, "maxLength": 512,
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
           "description": "Public display name for SEO and discovery files. Overrides root name without renaming the package."
         },
         "minScore": {
@@ -287,7 +670,10 @@
         },
         "focus": {
           "type": "array",
-          "items": { "type": "string", "minLength": 1 },
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
           "description": "Terms the site wants to be known for, most relevant first. `brain seo audit` reports where each one lives and how pages link to it; more than 3 is a warning, and nothing here blocks a build"
         },
         "sitemap": {
@@ -331,7 +717,11 @@
           "description": "Write sections.json, the manifest of every section (title, description, home page, feed and pages with URL, Markdown copy and lastmod), linked from every page; false turns it off"
         },
         "trailingSlash": {
-          "enum": ["never", "always", "ignore"],
+          "enum": [
+            "never",
+            "always",
+            "ignore"
+          ],
           "default": "never",
           "description": "One URL per page for crawlers: never = /about/ answers 301 to /about; always = /about answers 301 to /about/; ignore = both are served. Folded into the same single hop as redirects.json"
         },
@@ -389,16 +779,40 @@
     "analytics": {
       "description": "First-party behavior analytics stored in the native backend's Postgres (docs/backend/analytics.md). On by default when a native backend runs; false turns it off.",
       "oneOf": [
-        { "type": "boolean" },
+        {
+          "type": "boolean"
+        },
         {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "enabled": { "type": "boolean" },
-            "consent": { "enum": ["required", "none"], "description": "required: record nothing until consent('analytics')" },
-            "retentionDays": { "type": "integer", "minimum": 1, "maximum": 3650, "default": 180 },
-            "countryHeader": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$", "description": "Proxy header with an ISO country code, e.g. cf-ipcountry" },
-            "eventsPerMinute": { "type": "integer", "minimum": 1, "maximum": 6000, "default": 600 }
+            "enabled": {
+              "type": "boolean"
+            },
+            "consent": {
+              "enum": [
+                "required",
+                "none"
+              ],
+              "description": "required: record nothing until consent('analytics')"
+            },
+            "retentionDays": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3650,
+              "default": 180
+            },
+            "countryHeader": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]{1,64}$",
+              "description": "Proxy header with an ISO country code, e.g. cf-ipcountry"
+            },
+            "eventsPerMinute": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 6000,
+              "default": 600
+            }
           }
         }
       ]
@@ -440,9 +854,18 @@
     },
     "lint": {
       "type": "object",
-      "description": "Per-rule level, e.g. {\"B1307\": \"off\"}. Only the quality families (B09xx-B13xx) can be changed; other overrides are ignored.",
+      "description": "Per-rule level, e.g. {\"B1307\": \"off\"}. Quality families B09xx-B13xx can be changed. Optional WebMCP advice B1706/B1707/B1708 accepts off/info/warning; error overrides are ignored. Security and tool contracts cannot be lowered.",
       "propertyNames": {
-        "pattern": "^B(09|1[0-3])[0-9]{2}$"
+        "pattern": "^B(?:(09|1[0-3])[0-9]{2}|170[678])$"
+      },
+      "patternProperties": {
+        "^B170[678]$": {
+          "enum": [
+            "off",
+            "info",
+            "warning"
+          ]
+        }
       },
       "additionalProperties": {
         "enum": [
@@ -468,6 +891,102 @@
       ],
       "default": "baseline-widely",
       "description": "Browser support target for B21xx warnings. Explicit years must not be newer than the pinned web-features dataset."
+    },
+    "sentry": {
+      "oneOf": [
+        {
+          "const": false
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        }
+      ],
+      "default": false,
+      "description": "Optional private browser error reporting through the Node server. Requires explicit analytics consent and private BRAIN_SENTRY_DSN. Unsupported for static output. No automatic source-map upload."
+    },
+    "routeParams": {
+      "type": "object",
+      "description": "Explicit frontend route constraints keyed by exact brain map route. Whole raw encoded single segments use the bounded deterministic ASCII grammar; unknown routes/names, duplicate keys and invalid patterns fail B1880. See docs/ROUTE-CONSTRAINTS.md. Not authorization.",
+      "propertyNames": {
+        "pattern": "^/"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "minProperties": 1,
+        "propertyNames": {
+          "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$"
+        },
+        "additionalProperties": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "vitals": {
+      "default": false,
+      "description": "Independent explicit native document-performance aggregates. Requires existing Node/SSR and fixed native backend; no static conversion. Consent and DNT/GPC enforced, declared public patterns only; see docs/backend/vitals.md.",
+      "oneOf": [
+        {
+          "const": false
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "routes": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 512,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160,
+                "pattern": "^(/|(/[A-Za-z0-9_-]+|/:[a-z][a-z0-9_]*)+)$"
+              }
+            },
+            "retentionDays": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 90,
+              "default": 30
+            }
+          },
+          "if": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "routes"
+            ],
+            "properties": {
+              "routes": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

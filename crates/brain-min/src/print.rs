@@ -44,6 +44,18 @@ pub fn next_continues(next: &Tok) -> bool {
 }
 
 pub fn print(toks: &[Tok]) -> String {
+    print_observed(toks, |_, _| {})
+}
+
+/// Output byte offsets paired with the retained token's input byte offset. Source-map serialization
+/// converts both offsets to UTF-16 columns; synthesized tokens retain only their transformation anchor.
+pub fn print_with_positions(toks: &[Tok]) -> (String, Vec<(usize, usize)>) {
+    let mut positions = Vec::with_capacity(toks.len());
+    let out = print_observed(toks, |output, input| positions.push((output, input)));
+    (out, positions)
+}
+
+fn print_observed(toks: &[Tok], mut observe: impl FnMut(usize, usize)) -> String {
     let mut out = String::with_capacity(toks.iter().map(|t| t.text.len() + 1).sum());
     for (i, t) in toks.iter().enumerate() {
         if i > 0 {
@@ -57,6 +69,7 @@ pub fn print(toks: &[Tok]) -> String {
                 out.push(' ');
             }
         }
+        observe(out.len(), t.start);
         out.push_str(&t.text);
     }
     out

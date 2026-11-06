@@ -1,0 +1,28 @@
+{
+  "id": "apple-native-audience",
+  "kind": "capability",
+  "title": "Separate Apple native application audiences",
+  "why": "Native Apple challenge, token and refresh flows use a separate private audience list and one-use audience-bound nonces. Browser audiences remain unchanged.",
+  "changelog": [
+    "Separate Apple native challenge/token/refresh endpoints"
+  ],
+  "guide": "docs/APPLE-LINKEDIN.md",
+  "apis": [
+    "/_brain/auth/apple/native/challenge",
+    "/_brain/auth/apple/native/token",
+    "/_brain/auth/apple/native/refresh"
+  ],
+  "affects": [
+    ".brain_env"
+  ],
+  "adopt": {
+    "file": ".brain_env",
+    "snippet": "APPLE_NATIVE_APP_IDS=com.example.mobile"
+  },
+  "uses": [
+    {
+      "glob": ".brain_env",
+      "contains": "APPLE_NATIVE_APP_IDS"
+    }
+  ]
+}

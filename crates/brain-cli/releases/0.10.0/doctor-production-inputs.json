@@ -1,0 +1,18 @@
+{
+  "id": "doctor-production-inputs",
+  "kind": "fix",
+  "title": "Doctor assesses actual production inputs",
+  "why": "Artifact budgets, static consistency and signatures use the same isolated production inputs as build. A separate placeholder-only SEO assessment cannot silently inflate production bytes.",
+  "changelog": [
+    "Doctor uses matched production inputs for budgets and static consistency"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "apis": [
+    "brain doctor"
+  ],
+  "affects": [
+    "brain.json",
+    ".brain_env",
+    "views/**"
+  ]
+}

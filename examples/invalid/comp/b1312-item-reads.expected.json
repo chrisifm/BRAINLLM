@@ -1,0 +1,12 @@
+[
+  {
+    "code": "B1312",
+    "file": "invalid/comp/b1312-item-reads.brain",
+    "line": 5,
+    "col": 11,
+    "msg": "An item-dependent declared API GET appears inside this loop.",
+    "fix": "Review a batched endpoint or a bounded read plan if authorization and output remain equivalent. This pattern does not prove database query count or cache misses.",
+    "level": "warning",
+    "edits": []
+  }
+]

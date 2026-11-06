@@ -240,3 +240,52 @@ test('a page opened in a hidden tab does not wait for an observer that will not 
     doc.visibilityState = 'visible'
   }
 })
+
+test('visible mode begins loading when its document becomes hidden before intersection', async () => {
+  doc.visibilityState = 'visible'
+  let imports = 0
+  const h = host()
+  doc.body.appendChild(h)
+  const dispose = mount(() => lazy(hole(), () => {
+    imports++
+    return Promise.resolve({ default: () => [] })
+  }, 'visible'), h)
+  const observer = ios.at(-1)
+  try {
+    await tick()
+    assert.equal(imports, 0)
+    assert.equal(observer.on, true)
+    doc.visibilityState = 'hidden'
+    doc.dispatchEvent(new Event('visibilitychange'))
+    await tick()
+    assert.equal(imports, 1)
+    assert.equal(observer.on, false)
+    doc.dispatchEvent(new Event('visibilitychange'))
+    await tick()
+    assert.equal(imports, 1, 'repeated visibility notifications must not import twice')
+  } finally {
+    dispose()
+    h.remove()
+    doc.visibilityState = 'visible'
+  }
+})
+
+test('disposing a visible placeholder cancels its hidden-document fallback', async () => {
+  doc.visibilityState = 'visible'
+  let imports = 0
+  const h = host()
+  const dispose = mount(() => lazy(hole(), () => {
+    imports++
+    return Promise.resolve({ default: () => [] })
+  }, 'visible'), h)
+  dispose()
+  try {
+    doc.visibilityState = 'hidden'
+    doc.dispatchEvent(new Event('visibilitychange'))
+    await tick()
+    assert.equal(imports, 0)
+  } finally {
+    h.remove()
+    doc.visibilityState = 'visible'
+  }
+})

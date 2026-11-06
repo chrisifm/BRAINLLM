@@ -506,6 +506,7 @@ pub fn debit_subject_warnings(root: &Path) -> Vec<(String, String, String)> {
     let Ok(d) = domain::load(root, &resources) else { return Vec::new() };
     let mut out = Vec::new();
     for (name, op) in &d.operations {
+        if op.system_only { continue; }
         for step in &op.steps {
             let Some(debit) = &step.debit else { continue };
             let subject = debit.subject.trim();
@@ -537,7 +538,10 @@ pub fn secret_warnings(root: &Path) -> Vec<(String, String, String)> {
         .collect();
     if let Some((file, message, _)) = crate::platform_config::captcha_public_test_secret_problem(root, "production") {
         let message = message.strip_prefix(&format!("{file}: ")).unwrap_or(&message).to_string();
-        findings.push((file, message, "keep public test keys in development/testing only; set the real provider-issued secret under [production] or in the production host environment".into()));
+        findings.push((file, message, "configure provider-issued site and secret keys for production; keep public test keys in development/testing only".into()));
+    }
+    if let Some((file, message)) = crate::platform_config::captcha_public_test_site_key_warning(root, "production") {
+        findings.push((file, message, "inspect the production widget binding and configure the provider-issued site key; this advisory does not refuse startup".into()));
     }
     findings
 }
@@ -732,7 +736,7 @@ pub fn config_problems(setting: &dyn Fn(&str) -> Option<String>) -> Vec<(String,
             }
         }
         None => {
-            for key in ["GOOGLE_CLIENT_ID", "APPLE_CLIENT_ID", "BRAIN_AUTH_LINKEDIN_CLIENT_ID"] {
+            for key in ["GOOGLE_CLIENT_ID", "APPLE_CLIENT_ID", "APPLE_NATIVE_APP_IDS", "BRAIN_AUTH_LINKEDIN_CLIENT_ID"] {
                 if setting(key).is_some() {
                     report(format!("{key} needs native JWT sessions, and BRAIN_JWT_SECRET is not set"), secret_fix);
                 }
@@ -749,6 +753,11 @@ pub fn config_problems(setting: &dyn Fn(&str) -> Option<String>) -> Vec<(String,
         && let Err(error) = brain_backend::apple::Config::new(client, setting("APPLE_APP_ID"), setting("APPLE_REDIRECT_URI").unwrap_or_else(|| "https://example.com/".into()))
     {
         report(format!("APPLE_CLIENT_ID, APPLE_APP_ID or APPLE_REDIRECT_URI is invalid: {error}"), "use the Services ID (com.example.web), the primary App ID and the https Return URL registered with Apple");
+    }
+    if let Some(value) = setting("APPLE_NATIVE_APP_IDS")
+        && brain_backend::apple_native::Config::from_setting(&value).is_err()
+    {
+        report("APPLE_NATIVE_APP_IDS must list 1..16 distinct native bundle IDs".into(), "set an explicit comma-separated allowlist such as com.example.app; Apple web and notification IDs do not enable native login");
     }
     match (setting("BRAIN_AUTH_LINKEDIN_CLIENT_ID"), setting("BRAIN_AUTH_LINKEDIN_CLIENT_SECRET")) {
         (Some(client), Some(secret)) => {
@@ -774,7 +783,7 @@ pub fn config_problems(setting: &dyn Fn(&str) -> Option<String>) -> Vec<(String,
 /// The same findings for `brain check` and `brain doctor`, from the development section of .brain_env. Only for apps
 /// that run the native backend: a key like GOOGLE_CLIENT_ID means nothing to the backend in any other app.
 pub fn config_diagnostics(root: &Path) -> Vec<(String, String)> {
-    let native = root.join("server/resources").is_dir() || root.join("server/jobs").is_dir() || root.join("server/routes").is_dir() || crate::env::value(root, "development", "BRAIN_BACKEND_URL").is_some();
+    let native = root.join("server/resources").is_dir() || root.join("server/jobs").is_dir() || root.join("server/routes").is_dir() || crate::env::value(root, "development", "BRAIN_BACKEND_URL").is_some() || crate::env::value(root, "development", "APPLE_NATIVE_APP_IDS").is_some_and(|value| !value.is_empty());
     if !native {
         return Vec::new();
     }
@@ -1050,6 +1059,11 @@ pub fn run(args: &[String]) -> Result<(), String> {
             return Err(format!("B0770: {file} does not say which types it takes; fix: {fix}"));
         }
     }
+    if operation == "serve" {
+        if let Some((_, message, false)) = crate::platform_config::captcha_secret_problem(&root, &environment) {
+            return Err(format!("B0790: {message}; fix: configure provider-issued site and secret keys for production; keep public test keys in development/testing only"));
+        }
+    }
     let url = stated_database(args, &root, &environment)?;
     if operation == "users" {
         return operator(args, &url, environment == "production");
@@ -1211,6 +1225,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
         // Apple and LinkedIn default their return URLs to this origin; set the variable when the registered URL differs.
         let apple=setting("APPLE_CLIENT_ID").map(|client|brain_backend::apple::Config::new(client,setting("APPLE_APP_ID"),setting("APPLE_REDIRECT_URI").unwrap_or_else(||format!("{}/",origin.trim_end_matches('/'))))).transpose()?;
         if apple.is_some() && jwt.is_none() {return Err("Sign in with Apple requires configured native JWT sessions; set BRAIN_JWT_SECRET, issuer and audience".into());}
+        let apple_native=setting("APPLE_NATIVE_APP_IDS").map(|value|brain_backend::apple_native::Config::from_setting(&value)).transpose()?;
+        if apple_native.is_some() && jwt.is_none() {return Err("Native Sign in with Apple requires configured JWT sessions; set BRAIN_JWT_SECRET, issuer and audience".into());}
         let linkedin=match (setting("BRAIN_AUTH_LINKEDIN_CLIENT_ID"),setting("BRAIN_AUTH_LINKEDIN_CLIENT_SECRET")) {
             (Some(client),Some(secret))=>Some(brain_backend::linkedin::Config::new(client,secret,setting("BRAIN_AUTH_LINKEDIN_REDIRECT_URI").unwrap_or_else(||format!("{}/_brain/auth/linkedin/callback",origin.trim_end_matches('/'))))?),
             (None,None)=>None,
@@ -1233,7 +1249,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
             let setup = google_origin_setup(&sockets.http_origins);
             brain_backend::log_line!("{}",json!({"schemaVersion":1,"event":"google-origin-setup","environment":environment,"setup":setup}));
         }
-        let config=brain_backend::Config{api_keys:crate::api_key_config::load(&root)?,sockets:sockets.native_config()?,before_hooks:crate::hooks_executor::load(&root,&environment,&resources)?,webhooks:crate::webhook_config::load(&root,&environment)?,roles,mail,auth_public_base_url:Some(public_base),gcs,jwt,google,apple,linkedin,resources,jobs,uploads:root.join(".brain/uploads"),origins:sockets.http_origins,production:environment=="production"};
+        let config=brain_backend::Config{vitals:crate::native_vitals::load(&root)?,api_keys:crate::api_key_config::load(&root)?,sockets:sockets.native_config()?,before_hooks:crate::hooks_executor::load(&root,&environment,&resources)?,webhooks:crate::webhook_config::load(&root,&environment)?,roles,mail,auth_public_base_url:Some(public_base),gcs,jwt,google,apple,apple_native,linkedin,resources,jobs,uploads:root.join(".brain/uploads"),origins:sockets.http_origins,production:environment=="production"};
         brain_backend::analytics::configure(analytics_settings(&root)?)?;
         brain_backend::log_line!("{}",json!({"schemaVersion":1,"event":"backend-starting","url":format!("http://{addr}"),"experimental":true}));
         if let Some((msg,fix))=anonymous_catalog_warning(args,&environment){brain_backend::log_line!("{}",json!({"schemaVersion":1,"event":"backend-warning","code":"B0771","msg":msg,"fix":fix}));}
@@ -2389,6 +2405,35 @@ impl Drop for HandlerGroup {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn native_apple_diagnostics_cover_auth_only_projects_and_the_doctor_check_stage() {
+        let auth_only = fixture_root("native-apple-auth-only");
+        std::fs::write(auth_only.0.join(".brain_env"), "[development]\nAPPLE_NATIVE_APP_IDS=com.example.app\n").unwrap();
+        let diagnostics = super::config_diagnostics(&auth_only.0);
+        assert!(diagnostics.iter().any(|(message, _)| message.contains("APPLE_NATIVE_APP_IDS needs native JWT sessions")));
+        let app = fixture_root("native-apple-doctor");
+        crate::scaffold::new_app(&app.0).unwrap();
+        std::fs::write(app.0.join(".brain_env"), "[development]\nPUBLIC_SITE_URL=https://example.test\nAPPLE_NATIVE_APP_IDS=com.example.app\n").unwrap();
+        let (_, diagnostics) = crate::run_check(Some(app.0.clone())).unwrap();
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "B0751" && diagnostic.msg.contains("APPLE_NATIVE_APP_IDS")), "the doctor check stage must expose the startup requirement");
+    }
+    #[test]
+    fn native_apple_settings_are_independent_and_require_jwt_before_connecting() {
+        let settings = std::collections::BTreeMap::from([
+            ("APPLE_NATIVE_APP_IDS", "com.example.app,com.example.other"),
+            ("BRAIN_JWT_SECRET", "synthetic-native-apple-signing-secret-32-bytes"),
+        ]);
+        assert!(super::config_problems(&|key| settings.get(key).map(|value| value.to_string())).is_empty());
+        let missing = super::config_problems(&|key| (key == "APPLE_NATIVE_APP_IDS").then(|| "com.example.app".into()));
+        assert!(missing.iter().any(|(problem, _)| problem.contains("APPLE_NATIVE_APP_IDS needs native JWT sessions")));
+        let invalid = super::config_problems(&|key| match key {
+            "APPLE_NATIVE_APP_IDS" => Some("https://example.com".into()),
+            "BRAIN_JWT_SECRET" => Some("synthetic-native-apple-signing-secret-32-bytes".into()),
+            _ => None,
+        });
+        assert!(invalid.iter().any(|(problem, _)| problem.contains("APPLE_NATIVE_APP_IDS must list")));
+        assert!(invalid.iter().all(|(problem, _)| !problem.contains("https://example.com")), "diagnostics name settings, never their values");
+    }
     #[test]
     fn google_origin_setup_preserves_native_trust_and_names_local_provider_entries() {
         let origins = vec!["http://localhost:5280".to_string(), "https://example.test".into()];

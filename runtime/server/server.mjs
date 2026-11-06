@@ -24,6 +24,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import net from 'node:net'
 import { installNativeSockets } from './native-sockets.mjs'
 import { llmClient } from './llm.mjs'
+import { createRedisCache, publicCacheRequest } from './redis-cache.mjs'
 import { BlockList, isIP } from 'node:net'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -87,6 +88,8 @@ export class HttpError extends Error {
     Object.assign(this, extra)
   }
 }
+// Static local input fields remain diagnostic metadata; their existing HTTP status is unchanged.
+const nativeInput = (message, fields = { input: message }) => new HttpError(400, message, { code: 'INVALID_INPUT', fields })
 const bridgeBusy = message => new HttpError(503, message, { code: 'BRIDGE_BUSY', retryAfter: 1, fix: 'The server is at its limit of concurrent backend requests; retry after the Retry-After delay' })
 // Plain deliberate 4xx signals are portable from server-only application modules; exception messages stay private.
 function intendedStatus(error) {
@@ -162,9 +165,19 @@ function wantsHtml(req) {
   const quality = mediaQuality(accept, 'text/html')
   return quality > 0 && quality >= mediaQuality(accept, 'application/json')
 }
-function defaultError(status, rid, home = '/') {
-  const title = STATUS_CODES[status] || 'Request failed'
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>${status} — ${esc(title)}</title></head><body><main><h1>${status} — ${esc(title)}</h1><p>The request could not be completed. Try again or contact support with this reference.</p><p>Reference: <code>${esc(rid)}</code></p><a href="${esc(home)}">Return home</a></main></body></html>`
+const ERROR_CSS = ':root{color-scheme:light dark}body{margin:0;padding:clamp(1rem,5vw,4rem);font:1rem/1.6 system-ui,sans-serif;background:Canvas;color:CanvasText}main{max-width:42rem;margin:8vh auto;padding:clamp(1rem,4vw,2rem);border:1px solid GrayText;border-radius:.75rem}h1{font-size:clamp(1.4rem,4vw,2rem);line-height:1.2}code{overflow-wrap:anywhere}a{color:LinkText;text-underline-offset:.2em}a:focus-visible{outline:2px solid Highlight;outline-offset:4px}@media print{body{padding:0}main{margin:0;border:0}}@media(forced-colors:active){main{border-color:CanvasText}}'
+function errorWords(locale = 'en', dictionary = {}) {
+  const selected = key => typeof dictionary[key] === 'string' && dictionary[key].length > 0 && dictionary[key].length <= 2048 ? dictionary[key] : null
+  return (key, fallback) => ({ text: selected('http.error.' + key) || fallback, lang: selected('http.error.' + key) || locale === 'en' ? '' : ' lang="en"' })
+}
+function defaultError(status, rid, home = '/', options = {}) {
+  const locale = typeof options.locale === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/i.test(options.locale) && options.locale.length <= 35 ? options.locale : 'en'
+  const word = errorWords(locale, options.dictionary), title = word('title', STATUS_CODES[status] || 'Request failed')
+  const message = word('message', 'The request could not be completed. Try again or contact support with this reference.')
+  const reference = word('reference', 'Reference'), back = word('home', 'Return home')
+  const branding = options.branding === false ? '' : '<!-- by BRAINLLM https://chrisifm.github.io/BRAINLLM/ -->'
+  const direction = /^(?:ar|he|fa|ur)(?:-|$)/i.test(locale) ? ' dir="rtl"' : ''
+  return `<!doctype html><html lang="${esc(locale)}"${direction}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title${title.lang}>${status} — ${esc(title.text)}</title><link rel="stylesheet" href="${esc(home)}_brain/error.css">${branding}</head><body><main><h1${title.lang}>${status} — ${esc(title.text)}</h1><p${message.lang}>${esc(message.text)}</p><p><span${reference.lang}>${esc(reference.text)}:</span> <code>${esc(rid)}</code></p><a${back.lang} href="${esc(home)}">${esc(back.text)}</a></main></body></html>`
 }
 
 // Coding weights are transport preferences, not substring matches (br;q=0 explicitly forbids Brotli). Ties keep the
@@ -260,7 +273,7 @@ function providerStartRedirect(method, path, status, location) {
 // ctx.backend.files(bucket): the same file calls as job and route handlers (docs/backend/files.md).
 function bucketClient(target, key, bucket, readBudgetMs = () => 0) {
   const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
-  if (typeof bucket !== 'string' || !/^[a-z][a-z0-9_]{0,47}$/.test(bucket)) throw new HttpError(400, 'Invalid native bucket name')
+  if (typeof bucket !== 'string' || !/^[a-z][a-z0-9_]{0,47}$/.test(bucket)) throw nativeInput('Invalid native bucket name', { bucket: 'Invalid native bucket name' })
   const base = '/_brain/files/' + bucket
   const idPath = id => { if (typeof id !== 'string' || !UUID.test(id)) throw new HttpError(404, 'No file has this id; file ids are UUIDs'); return base + '/' + id }
   // A read waits for a draining or restarting backend like ctx.backend reads do (nativeAuthBridge); a write never repeats.
@@ -287,15 +300,15 @@ function bucketClient(target, key, bucket, readBudgetMs = () => 0) {
   const json = async response => { try { return await response.json() } catch { throw new HttpError(502, 'Native file response is invalid') } }
   return Object.freeze({
     async list(options = {}) {
-      if (!options || typeof options !== 'object' || Array.isArray(options) || Object.keys(options).some(k => !['limit', 'offset', 'record'].includes(k))) throw new HttpError(400, 'Invalid native file list options')
+      if (!options || typeof options !== 'object' || Array.isArray(options) || Object.keys(options).some(k => !['limit', 'offset', 'record'].includes(k))) throw nativeInput('Invalid native file list options', { options: 'Invalid native file list options' })
       const { limit, offset, record } = options
-      if ((limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 100)) || (offset !== undefined && (!Number.isInteger(offset) || offset < 0 || offset > 10000)) || (record !== undefined && !UUID.test(String(record)))) throw new HttpError(400, 'Invalid native file list options')
+      if ((limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 100)) || (offset !== undefined && (!Number.isInteger(offset) || offset < 0 || offset > 10000)) || (record !== undefined && !UUID.test(String(record)))) throw nativeInput('Invalid native file list options', { options: 'Invalid native file list options' })
       const q = new URLSearchParams(Object.entries({ limit, offset, record }).filter(([, v]) => v !== undefined))
       return json(await send('GET', base + (q.size ? '?' + q : ''), undefined, 10000))
     },
     async meta(id) { return json(await send('GET', idPath(id) + '/meta', undefined, 10000)) },
     async read(id, { maxBytes = 16 * 1024 * 1024 } = {}) {
-      if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > 64 * 1024 * 1024) throw new HttpError(400, 'Invalid native file read limit')
+      if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > 64 * 1024 * 1024) throw nativeInput('Invalid native file read limit', { maxBytes: 'Invalid native file read limit' })
       const response = await send('GET', idPath(id), undefined, 30000)
       if (Number(response.headers.get('content-length')) > maxBytes) { await response.body?.cancel(); throw new HttpError(413, 'The file exceeds the read limit; raise maxBytes up to 64 MiB') }
       const bytes = Buffer.from(await response.arrayBuffer())
@@ -303,8 +316,8 @@ function bucketClient(target, key, bucket, readBudgetMs = () => 0) {
       return { bytes, contentType: response.headers.get('content-type'), etag: response.headers.get('etag') }
     },
     async upload({ filename, contentType = 'application/octet-stream', data, record } = {}) {
-      if (typeof filename !== 'string' || !filename || Buffer.byteLength(filename) > 255 || typeof contentType !== 'string' || (record !== undefined && !UUID.test(String(record)))) throw new HttpError(400, 'Invalid native file upload')
-      if (typeof data !== 'string' && !(data instanceof Uint8Array)) throw new HttpError(400, 'File data must be a string, Buffer or Uint8Array')
+      if (typeof filename !== 'string' || !filename || Buffer.byteLength(filename) > 255 || typeof contentType !== 'string' || (record !== undefined && !UUID.test(String(record)))) throw nativeInput('Invalid native file upload', { file: 'Invalid native file upload' })
+      if (typeof data !== 'string' && !(data instanceof Uint8Array)) throw nativeInput('File data must be a string, Buffer or Uint8Array', { data: 'File data must be a string, Buffer or Uint8Array' })
       const form = new FormData()
       form.set('file', new Blob([data], { type: contentType }), filename)
       return json(await send('POST', base + (record === undefined ? '' : '?record=' + record), form, 60000))
@@ -470,6 +483,16 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession, r
     return typeof prior === 'string' && prior.length <= 4096 ? prior + ', ' + peer : peer
   }
   const requestHeaders = (req, rid, extra = []) => {
+    // Node combines or discards raw duplicates. Single-value verification and credential fields must stay unambiguous.
+    // Explicit verification headers are single-valued even when the ordinary header has list syntax.
+    const single = new Set(['content-type','authorization','x-api-key',...extra.map(name => String(name).toLowerCase())]), seen = new Set()
+    const rawHeaders = Array.isArray(req.rawHeaders) ? req.rawHeaders : []
+    for (let at = 0; at < rawHeaders.length; at += 2) {
+      const name = rawHeaders[at].toLowerCase()
+      if (!single.has(name)) continue
+      if (seen.has(name)) throw new HttpError(400, 'Send each declared or single-value credential header once')
+      seen.add(name)
+    }
     const headers = { 'x-request-id':rid }
     for (const key of [...REQUEST_HEADERS, ...extra]) {
       const value = req.headers[key]
@@ -537,20 +560,32 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession, r
     })
   }
   function proxy(req, res, url, rid, reply, responseLimit = 20 * 1024 * 1024, declared) {
+    if (req.$brainWarmupSignal?.aborted) throw new HttpError(503, 'Backend request unavailable')
     if (stopped || active >= 8) throw bridgeBusy('Backend request capacity is unavailable')
     if (!['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(req.method)) throw new HttpError(405, 'Method not allowed')
     const post = req.method === 'POST'
-    const limit = url.pathname === '/_brain/uploads' && post ? 5 * 1024 * 1024 + 65536 : declared || post && /^\/api\/[^/]+\/batch$/.test(url.pathname) ? 1024 * 1024 : 65536
+    const vitals = url.pathname === '/_brain/vitals'
+    const limit = vitals ? 4096 : url.pathname === '/_brain/uploads' && post ? 5 * 1024 * 1024 + 65536 : declared || post && /^\/api\/[^/]+\/batch$/.test(url.pathname) ? 1024 * 1024 : 65536
     if (Number(req.headers['content-length'] || 0) > limit) throw new HttpError(413, 'Request body is too large')
+    // Anonymous performance never carries credentials, identity, referrer or arbitrary headers.
+    const headers = vitals ? (() => {
+      const result = {}
+      for (const name of ['origin','content-type','content-length','dnt','sec-gpc']) {
+        if ((req.rawHeaders || []).filter((_, at) => at % 2 === 0 && req.rawHeaders[at].toLowerCase() === name).length > 1) throw new HttpError(400, 'Send each collector header once')
+        const value = req.headers[name]
+        if (typeof value === 'string' && value.length <= 8192) result[name] = value
+      }
+      return result
+    })() : requestHeaders(req, rid, declared?.headers)
     active++
     return new Promise((resolve, reject) => {
       let outgoing, timer, done = false, bytes = 0, requestBytes = 0, failure, transport
       const chunks = []
-      const headers = requestHeaders(req, rid, declared?.headers)
       const finish = (error, backend) => {
         if (done) return
         done = true; clearTimeout(timer); active--; proxyBytes -= bytes; owned.delete(outgoing)
         req.removeListener('aborted',cancel); req.removeListener('data',data); req.removeListener('end',end)
+        req.$brainWarmupSignal?.removeEventListener('abort',cancel)
         res.removeListener('close',cancel)
         if (error) { if (!res.destroyed) reject(failure || new HttpError(503,'Backend request unavailable',{transport})); else resolve(); return }
         const safe = { 'cache-control':'no-store' }
@@ -562,7 +597,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession, r
         if (declared) for (const [key, value] of Object.entries(backend.headers)) {
           if ((key === 'link' || key === 'content-language' || key.startsWith('x-') && key !== 'x-request-id') && typeof value === 'string' && value.length <= 8192) safe[key] = value
         }
-        const cookies = nativeCookies(backend.headers['set-cookie'])
+        const cookies = vitals ? [] : nativeCookies(backend.headers['set-cookie'])
         if (cookies.length) safe['set-cookie'] = cookies
         if (backend.statusCode >= 500 && !res.$capture) res.$brainCause = 'answered by the native backend'
         try { reply(res,backend.statusCode || 502,req.method === 'HEAD' ? '' : Buffer.concat(chunks,bytes),safe,providerStartRedirect(req.method,url.pathname,backend.statusCode,safe.location)); resolve() } catch (e) { reject(e) }
@@ -584,8 +619,9 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession, r
           backend.once('end',()=>finish(false,backend)); backend.once('error',e=>{transport=e.code;finish(true)}); backend.once('aborted',()=>{transport='BACKEND_ABORTED';finish(true)})
         })
         owned.add(outgoing)
-        timer = setTimeout(()=>{failure = new HttpError(504,'Backend request timed out');outgoing.destroy();finish(true)},declared || url.pathname === '/_brain/uploads' || url.pathname.startsWith('/_brain/uploads/') ? 35000 : 10000)
+        timer = setTimeout(()=>{failure = new HttpError(504,'Backend request timed out');outgoing.destroy();finish(true)},vitals ? 5000 : declared || url.pathname === '/_brain/uploads' || url.pathname.startsWith('/_brain/uploads/') ? 35000 : 10000)
         outgoing.once('error',e=>{transport=e.code;finish(true)}); req.once('aborted',cancel); res.once('close',cancel)
+        req.$brainWarmupSignal?.addEventListener('abort',cancel,{once:true})
         req.on('data',data); req.once('end',end)
         if (req.readableEnded) end()
       } catch { outgoing?.destroy(); finish(true) }
@@ -608,7 +644,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession, r
   // Reaches the request helper of a resource client without adding a method anyone can see on it.
   const OPERATION_CALL = Symbol('operation')
   const resource = (incoming, response, rid, name, serviceKey) => {
-    if (typeof name !== 'string' || !/^[a-z][a-z0-9_]{0,47}$/.test(name)) throw new HttpError(400, 'Invalid native resource name')
+    if (typeof name !== 'string' || !/^[a-z][a-z0-9_]{0,47}$/.test(name)) throw nativeInput('Invalid native resource name', { resource: 'Invalid native resource name' })
     const idPath = id => {
       if (typeof id !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(id)) throw new HttpError(404, 'No record has this id; record ids are UUIDs')
       return '/api/' + name + '/' + id
@@ -618,13 +654,14 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession, r
       if (method !== 'GET' && incoming.method !== 'POST') throw new HttpError(405, 'Native writes require a server function called through POST')
       let bytes = Buffer.alloc(0)
       if (body !== undefined) {
-        if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'Native resource values must be an object')
-        try { bytes = Buffer.from(JSON.stringify(body)) } catch { throw new HttpError(400, 'Native resource values must be JSON serializable') }
+        if (!body || typeof body !== 'object' || Array.isArray(body)) throw nativeInput('Native resource values must be an object', { body: 'Native resource values must be an object' })
+        try { bytes = Buffer.from(JSON.stringify(body)) } catch { throw nativeInput('Native resource values must be JSON serializable', { body: 'Native resource values must be JSON serializable' }) }
         if (bytes.length > 65536) throw new HttpError(413, 'Native resource values exceed their byte budget')
       }
       const outgoing = () => {
         const req = Readable.from(bytes.length ? [bytes] : [])
         req.method = method
+        req.$brainWarmupSignal = incoming.$brainWarmupSignal
         req.$brainForwardedFor = forwardedFor(incoming)
         // A service call acts as the key's owner, never as the visitor: it sends no session.
         req.headers = { ...(serviceKey ? { authorization: 'Bearer ' + serviceKey } : ownSession ? {} : { cookie: cookies(incoming, false) }), accept: 'application/json', 'content-type':'application/json', 'content-length':String(bytes.length) }
@@ -685,7 +722,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession, r
           } catch (e) {
             const transient = ['ECONNREFUSED', 'ECONNRESET'].includes(e?.transport) || askAgain.has(e)
             const pause = Math.max(wait, (e?.retryAfter || 0) * 1000)
-            if (method !== 'GET' || !transient || stopped || response.destroyed || Date.now() + pause > end) throw e
+            if (method !== 'GET' || !transient || stopped || incoming.$brainWarmupSignal || response.destroyed || Date.now() + pause > end) throw e
             req.destroy()
             await new Promise(done => setTimeout(done, pause))
             if (stopped || response.destroyed) throw e
@@ -711,7 +748,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession, r
     const names = (value, label) => {
       const list = typeof value === 'string' ? value.split(',') : value
       const shape = label === 'include' ? /^[a-z][a-z0-9_]{0,47}(?:\.[a-z][a-z0-9_]{0,47}){0,2}$/ : /^[a-z][a-z0-9_]{0,47}$/
-      if (!Array.isArray(list) || list.length > 16 || list.some(item => typeof item !== 'string' || !shape.test(item))) throw new HttpError(400, `Invalid native ${label} names`)
+      if (!Array.isArray(list) || list.length > 16 || list.some(item => typeof item !== 'string' || !shape.test(item))) throw nativeInput(`Invalid native ${label} names`, { [label]: `Use at most 16 valid ${label} names` })
       return list.join(',')
     }
     return Object.freeze({
@@ -719,30 +756,34 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession, r
       // the HTTP list contract (docs/backend/filters.md, sorting.md, pagination.md): the backend validates declared
       // filters and sorts and answers 422 {errors}; this only rejects shapes the query string cannot express
       list(options = {}) {
-        if (!options || typeof options !== 'object' || Array.isArray(options) || Object.keys(options).some(key => !LIST_OPTIONS.includes(key))) throw new HttpError(400, 'Invalid native list options')
+        if (!options || typeof options !== 'object' || Array.isArray(options) || Object.keys(options).some(key => !LIST_OPTIONS.includes(key))) throw nativeInput('Invalid native list options', { options: 'Invalid native list options' })
         const {search, limit, offset, filter, sort, cursor, after, include, aggregate, count, fields} = options
-        if ((search !== undefined && (typeof search !== 'string' || Buffer.byteLength(search) > 256)) || (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 100)) || (offset !== undefined && (!Number.isInteger(offset) || offset < 0 || offset > 10000))) throw new HttpError(400, 'Invalid native list pagination or search')
+        const pagination = {}
+        if (search !== undefined && (typeof search !== 'string' || Buffer.byteLength(search) > 256)) pagination.search = 'Use text of at most 256 bytes'
+        if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 100)) pagination.limit = 'Use a whole number from 1 to 100'
+        if (offset !== undefined && (!Number.isInteger(offset) || offset < 0 || offset > 10000)) pagination.offset = 'Use a whole number from 0 to 10000'
+        if (Object.keys(pagination).length) throw nativeInput('Invalid native list pagination or search', pagination)
         const q = new URLSearchParams()
         if (filter !== undefined) {
-          if (!filter || typeof filter !== 'object' || Array.isArray(filter) || Object.keys(filter).length > 32) throw new HttpError(400, 'Invalid native list filter')
+          if (!filter || typeof filter !== 'object' || Array.isArray(filter) || Object.keys(filter).length > 32) throw nativeInput('Invalid native list filter', { filter: 'Invalid native list filter' })
           const scalar = value => {
             if (typeof value === 'number' && Number.isFinite(value)) return String(value)
             if (typeof value === 'boolean') return String(value)
             if (typeof value === 'string' && Buffer.byteLength(value) <= 256) return value
-            throw new HttpError(400, 'Invalid native filter value')
+            throw nativeInput('Invalid native filter value', { filter: 'Invalid native filter value' })
           }
           for (const [field, condition] of Object.entries(filter)) {
-            if (!/^[a-z][a-z0-9_]{0,47}(?:\.[a-z][a-z0-9_]{0,47})?$/.test(field)) throw new HttpError(400, 'Invalid native list filter field')
+            if (!/^[a-z][a-z0-9_]{0,47}(?:\.[a-z][a-z0-9_]{0,47})?$/.test(field)) throw nativeInput('Invalid native list filter field', { filter: 'Invalid native list filter field' })
             const ops = condition && typeof condition === 'object' && !Array.isArray(condition) ? Object.entries(condition) : [['eq', condition]]
-            if (!ops.length) throw new HttpError(400, 'Invalid native filter value')
+            if (!ops.length) throw nativeInput('Invalid native filter value', { filter: 'Invalid native filter value' })
             for (const [op, value] of ops) {
-              if (!FILTER_OPS.includes(op)) throw new HttpError(400, 'Invalid native filter operator')
+              if (!FILTER_OPS.includes(op)) throw nativeInput('Invalid native filter operator', { filter: 'Invalid native filter operator' })
               let raw
               if (op === 'in' || op === 'between' || op === 'has') {
                 const items = Array.isArray(value) ? value : [value]
-                if (!items.length || items.length > 50 || (op === 'between' && items.length !== 2)) throw new HttpError(400, 'Invalid native filter value')
+                if (!items.length || items.length > 50 || (op === 'between' && items.length !== 2)) throw nativeInput('Invalid native filter value', { filter: 'Invalid native filter value' })
                 raw = items.map(scalar)
-                if (raw.some(item => item.includes(','))) throw new HttpError(400, 'Invalid native filter value')
+                if (raw.some(item => item.includes(','))) throw nativeInput('Invalid native filter value', { filter: 'Invalid native filter value' })
                 raw = raw.join(',')
               } else raw = scalar(value)
               q.append(op === 'eq' ? field : `${field}[${op}]`, raw)
@@ -754,24 +795,24 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession, r
         if (offset !== undefined) q.set('offset', String(offset))
         if (sort !== undefined) {
           const keys = typeof sort === 'string' ? sort.split(',') : sort
-          if (!Array.isArray(keys) || !keys.length || keys.length > 4 || keys.some(key => typeof key !== 'string' || !/^-?[a-z][a-z0-9_]{0,47}$/.test(key))) throw new HttpError(400, 'Invalid native list sort')
+          if (!Array.isArray(keys) || !keys.length || keys.length > 4 || keys.some(key => typeof key !== 'string' || !/^-?[a-z][a-z0-9_]{0,47}$/.test(key))) throw nativeInput('Invalid native list sort', { sort: 'Invalid native list sort' })
           q.set('sort', keys.join(','))
         }
-        if (cursor !== undefined && after !== undefined) throw new HttpError(400, 'Use either cursor or after')
+        if (cursor !== undefined && after !== undefined) throw nativeInput('Use either cursor or after', { cursor: 'Use either cursor or after' })
         for (const [key, value] of [['cursor', cursor], ['after', after]]) if (value !== undefined) {
-          if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,2048}$/.test(value)) throw new HttpError(400, 'Invalid native list cursor')
+          if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,2048}$/.test(value)) throw nativeInput('Invalid native list cursor', { cursor: 'Invalid native list cursor' })
           q.set(key, value)
         }
         for (const [key, value] of [['include', include], ['aggregate', aggregate], ['count', count], ['fields', fields]]) if (value !== undefined) q.set(key, names(value, key))
         if (options.owner !== undefined) {
-          if (options.owner !== 'me') throw new HttpError(400, "Invalid native list owner; use 'me'")
+          if (options.owner !== 'me') throw nativeInput("Invalid native list owner; use 'me'", { owner: "Use me" })
           q.set('owner', 'me')
         }
         const query = q.toString()
         return request('GET', '/api/' + name + (query ? '?' + query : ''))
       },
       get(id, options = {}) {
-        if (!options || typeof options !== 'object' || Array.isArray(options) || Object.keys(options).some(key => key !== 'include')) throw new HttpError(400, 'Invalid native get options')
+        if (!options || typeof options !== 'object' || Array.isArray(options) || Object.keys(options).some(key => key !== 'include')) throw nativeInput('Invalid native get options', { include: 'Invalid native get options' })
         const path = idPath(id)
         return request('GET', options.include === undefined ? path : path + '?' + new URLSearchParams({include: names(options.include, 'include')}))
       },
@@ -916,7 +957,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession, r
     slugRedirect: (name, slug) => resource(incoming, response, rid, name).slugRedirect(slug),
     // A declared operation, as this visitor (docs/backend/transactions.md).
     operation: (name, input = {}) => {
-      if (typeof name !== 'string' || !/^[a-z][a-z0-9_]{0,47}$/.test(name)) throw new HttpError(400, 'Invalid operation name')
+      if (typeof name !== 'string' || !/^[a-z][a-z0-9_]{0,47}$/.test(name)) throw nativeInput('Invalid operation name', { operation: 'Invalid operation name' })
       return resource(incoming, response, rid, 'operations')[OPERATION_CALL](name, input)
     },
     login: (credentials, options) => login(incoming, response, rid, credentials, options),
@@ -966,7 +1007,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession, r
 export function createServer(o = {}) {
   const dist = resolve(o.dist || process.cwd())
   // ctx.env: what the supervisor passed, read-only; the service key stays with ctx.backend.service
-  const { BRAIN_SERVICE_API_KEY: serviceKey, BRAIN_JOBS_API_KEY: _jobs, BRAIN_JOBS_SYSTEM_KEY: _jobsSystem, BRAIN_ROUTES_API_KEY: _routes, BRAIN_ROUTES_SYSTEM_KEY: _routesSystem, ...visibleEnv } = o.env || ENV
+  const { BRAIN_SENTRY_DSN: sentryDSN, BRAIN_SENTRY_HOST: sentryHost, BRAIN_SERVICE_API_KEY: serviceKey, BRAIN_JOBS_API_KEY: _jobs, BRAIN_JOBS_SYSTEM_KEY: _jobsSystem, BRAIN_ROUTES_API_KEY: _routes, BRAIN_ROUTES_SYSTEM_KEY: _routesSystem, ...visibleEnv } = o.env || ENV
   const env = Object.freeze(visibleEnv)
   const backendSession = o.backendSession ?? env.BRAIN_BACKEND_SESSION
   if (backendSession && backendSession !== 'app') throw Error("BRAIN_BACKEND_SESSION must be app, or unset for the backend's own session")
@@ -1035,6 +1076,14 @@ export function createServer(o = {}) {
     return out
   }
   const mf = readManifest(dist)
+  if (mf.sentry && (typeof sentryDSN !== 'string' || !sentryDSN)) throw Error('Sentry is enabled; set private BRAIN_SENTRY_DSN before starting the Node server')
+  let sentryTunnel, sentryStopped = false
+  const sentryReady = mf.sentry ? import('./sentry.mjs').then(({ createSentryTunnel }) => {
+    sentryTunnel = createSentryTunnel({ dsn: sentryDSN, approvedHost: sentryHost, assets: mf.sentry.assets, publicOrigin: mf.site || env.PUBLIC_SITE_URL })
+    if (sentryStopped) sentryTunnel.close()
+  }) : null
+  // A rejected startup remains observable through listen(), without an unhandled rejection before it is called.
+  sentryReady?.catch(() => {})
   // The build policy controls attribution independently of CSP and other security headers.
   let compilerBranding=mf.compilerBranding!==false
   try {const path=join(dist,'brain-build.json'),meta=lstatSync(path);if(meta.isFile()&&!meta.isSymbolicLink()&&meta.size<=16384&&JSON.parse(readFileSync(path,'utf8')).compilerBranding===false)compilerBranding=false}catch{}
@@ -1060,6 +1109,12 @@ export function createServer(o = {}) {
   if (nativeSockets && !native) throw Error('Native sockets require a configured native backend; fix: run `brain backend serve` and set BRAIN_BACKEND_URL to its loopback URL')
   // the build's single route table (#187): already in match order, each with its RegExp source (named groups = params)
   const routes = mf.routes.map(r => ({ ...r, rx: r.rx ? new RegExp(r.rx) : exact(r.path) }))
+  const errorOptions = (req, route) => {
+    route ||= routes.find(route => route.rx.test(req?.$brainPath || '/'))
+    const locale = route?.locale || mf.errorFallback?.defaultLocale || 'en'
+    return { locale, dictionary: mf.errorFallback?.locales?.[locale] || {}, branding: compilerBranding }
+  }
+  const errorDocument = (req, status, rid) => defaultError(status, rid, BASE, errorOptions(req))
   // The address RPC and form limits key on, ctx.req.ip and the logs: a client header counts only through a trusted proxy.
   const proxies = trustedProxies(o.trustProxy ?? (env.BRAIN_TRUST_PROXY ? env.BRAIN_TRUST_PROXY.split(',').map(entry => entry.trim()) : mf.trustProxy) ?? [])
   let proxyWarned = false
@@ -1124,6 +1179,9 @@ export function createServer(o = {}) {
   // Base path (§23 #148): the app lives under mf.base ("/app/"); routes, files and functions are matched on the app
   // path (base stripped); redirects the app gives as app paths get it back.
   const BASE = mf.base || '/'
+  // Opt-in infrastructure credentials stay in the process environment, never in a build artifact.
+  const redisCache = createRedisCache({ url: env.REDIS_URL, namespace: env.BRAIN_REDIS_NAMESPACE, build: mf.build, base: BASE })
+  if (env.REDIS_URL && env.BRAIN_REDIS_NAMESPACE && !redisCache) log('warn', 'Redis cache is disabled', { code: 'REDIS_CACHE_CONFIG', fix: 'Use a valid redis/rediss URL, a 1..64 character alphanumeric namespace with colon, underscore or hyphen, and a nonempty build identity' })
   const analyticsTag = native && (o.analytics ?? env.BRAIN_ANALYTICS) !== 'off' && o.analytics !== false ? `<script type="module" async src="${BASE}_brain/analytics.js"></script>` : ''
   const RD = mf.redirects || {}, RDX = (RD.patterns || []).map(p => ({ re: new RegExp(p.re), to: p.to, status: p.status || 301 }))
   // `/old/` and `/old` are the same source (brain-seo normalizes the trailing slash)
@@ -1186,7 +1244,7 @@ export function createServer(o = {}) {
       if (!kind || kind.startsWith('text/plain')) {
         const rid = res.getHeader('x-request-id') || ''
         if (wantsHtml(res.req)) {
-          body = defaultError(status, rid, BASE)
+          body = errorDocument(res.req, status, rid)
           headers['content-type'] = MIME['.html']
           headers['content-security-policy'] = mf.csp || CSP0
         } else {
@@ -1237,7 +1295,7 @@ export function createServer(o = {}) {
     if (!wantsHtml(res.req)) return send(res, status, json({ schemaVersion: 1, status, rid, error: detail || STATUS_CODES[status] || 'Request failed' }), { 'content-type': MIME['.json'] })
     const custom = (status === 404 && mf.notFound) || (mf.errors && mf.errors[status]) || (status === 410 && !file('410.html') ? mf.notFound : `${status}.html`)
     const path = typeof custom === 'string' && file(custom)
-    return html(res, status, path ? readFileSync(path, 'utf8') : defaultError(status, rid, BASE))
+    return html(res, status, path ? readFileSync(path, 'utf8') : errorDocument(res.req, status, rid))
   }
   // `/403`, `/404.html`, `/503`…: the status when the app has that page, else 0 and the path is an ordinary one
   const reservedStatus = pathname => {
@@ -1268,7 +1326,7 @@ export function createServer(o = {}) {
   // runs it before `brain:ready`, so the first request after a (re)start finds them loaded instead of reading,
   // compiling and evaluating the app's module graph (and its packages) while the visitor waits. A module that throws
   // stays rejected in `mods`, exactly as the request that imports it would have found it; it is counted, never fatal.
-  const warm = async () => {
+  const warm = async signal => {
     const want = new Set(['_server/dom.js', mf.core])
     const add = r => {
       if (!r || typeof r !== 'object') return
@@ -1283,6 +1341,7 @@ export function createServer(o = {}) {
     for (const m of ['_server/brain-hydrate.js', '_server/brain-form.js']) if (file(m)) want.add(m)
     let failed = 0
     for (const rel of want) {
+      if (signal?.aborted) break
       try {
         await load(rel)
       } catch {
@@ -1295,13 +1354,16 @@ export function createServer(o = {}) {
   const context = (req, res, url, extra) => {
     const cookies = parseCookies(req.headers.cookie)
     const { user, session: ses } = nativeSession ? { user: req.$nativeUser ?? null, session: sessionSecrets(native.session(req, res, res.getHeader('x-request-id')), cookies, secret) } : sessionFrom(cookies, secret)
-    const signal = lifetime(res)
+    const signal = req.$brainWarmupSignal || lifetime(res)
+    const backend = native ? native.backend(req, res, res.getHeader('x-request-id')) : null
+    const denyWarmWrite = () => { throw new HttpError(403, 'Startup warmup permits anonymous public reads only') }
+    const readonlySession = req.$brainWarmupSignal ? Object.freeze({ ...ses, user:null, set:denyWarmWrite, clear:denyWarmWrite, setSecret:denyWarmWrite, clearSecret:denyWarmWrite }) : ses
     return {
-      url, query: Object.fromEntries(url.searchParams), cookies, user, session: ses, env,
-      ...(native ? { backend: native.backend(req, res, res.getHeader('x-request-id')) } : {}),
+      url, query: Object.fromEntries(url.searchParams), cookies, user, session: readonlySession, env,
+      ...(backend ? { backend: req.$brainWarmupSignal ? Object.freeze({ ...backend, service:denyWarmWrite, files:denyWarmWrite, operation:denyWarmWrite, login:denyWarmWrite, signup:denyWarmWrite, google:Object.freeze({challenge:denyWarmWrite,login:denyWarmWrite}) }) : backend } : {}),
       // `prefetch`: the router fetched this page ahead of a click (§19); a `load` with side effects can skip them
       prefetch: req.headers['x-brain-prefetch'] === '1' || /\bprefetch\b/.test(req.headers['sec-purpose'] ?? ''),
-      req: { method: req.method, headers: req.headers, ip: ipOf(req) }, signal, llm: llmClient(env, signal), ...extra,
+      req: { method: req.method, headers: req.headers, ip: ipOf(req) }, signal, llm: req.$brainWarmupSignal ? denyWarmWrite : llmClient(env, signal), ...extra,
     }
   }
 
@@ -1315,8 +1377,20 @@ export function createServer(o = {}) {
   const FILLING = new Map()
   const SSRC = new Map(), SSRC_MAX = 500, SSRC_BYTES = 32 * 1024 * 1024, SSRC_ENTRY = 1024 * 1024
   let ssrBytes = 0
+  const rememberSSR = (key, c) => {
+    ssrBytes -= SSRC.get(key)?.bytes || 0
+    SSRC.delete(key)
+    SSRC.set(key, c)
+    ssrBytes += c.bytes
+    while (SSRC.size > SSRC_MAX || ssrBytes > SSRC_BYTES) {
+      const oldest = SSRC.keys().next().value
+      ssrBytes -= SSRC.get(oldest).bytes
+      SSRC.delete(oldest)
+    }
+  }
   async function cached(req, res, route, params, url, rid) {
-    const n = +route.cache, ms = n * 1000, key = (route.locale || '') + url.pathname + cacheSearch(url)
+    const n = +route.cache, ms = n * 1000, key = JSON.stringify([url.origin, route.locale || '', url.pathname, cacheSearch(url)])
+    const redisKey = key
     // `kept.answer`: what this render answered when it was not a 200 (an error page, a redirect, a not-found), so the
     // request that started it replays that answer instead of running load() and its backend reads a second time
     const fill = (kept = {}) => {
@@ -1324,30 +1398,24 @@ export function createServer(o = {}) {
       const set = {}
       return new Promise(ok => {
         const cap = { req, $capture: (out, h, st) => {
-          const headers = Object.fromEntries(Object.entries(h).map(([k, v]) => [k.toLowerCase(), v]))
-          const privateResponse = headers['set-cookie'] || headers['vary'] || /private|no-store|no-cache/i.test(headers['cache-control'] || '')
+          h = { ...set, ...h }
+          const privateResponse = Object.entries(h).some(([key, value]) => ['set-cookie', 'vary'].includes(key.toLowerCase()) || key.toLowerCase() === 'cache-control' && /private|no-store|no-cache/i.test(value || ''))
           if (st >= 500) failed = true
           if (st !== 200) kept.answer = { page: out, h, st, set }
           ok(st === 200 ? { out, h, cacheable: !privateResponse, etag: 'W/"' + tag(out) + '"', t: Date.now(), bytes: Buffer.byteLength(out) } : null)
         }, writeHead(st, h) { if (st >= 500) failed = true; kept.answer = { st, h: h || {}, set } }, end: body => { if (kept.answer && kept.answer.page === undefined) kept.answer.body = body; ok(null) }, setHeader(k, v) { set[k] = v }, getHeader: name => (name === 'x-request-id' ? rid : set[name]), once() {}, removeListener() {} }
         ssr(req, cap, route, params, url, rid, null, 200, null, true).catch(() => ok(null))
-      }).then(c => {
+      }).then(async c => {
         // A failed revalidation keeps the copy until 2N, which is what `stale-if-error` promises downstream.
         if ((!c || !c.cacheable) && (failed || req.$brainFailedReads) && SSRC.has(key)) return c
         if (!c || !c.cacheable) {
           ssrBytes -= SSRC.get(key)?.bytes || 0
           SSRC.delete(key)
+          await redisCache?.delete(redisKey)
         }
         if (c && c.cacheable && c.bytes <= SSRC_ENTRY) {
-          ssrBytes -= SSRC.get(key)?.bytes || 0
-          SSRC.delete(key)
-          SSRC.set(key, c)
-          ssrBytes += c.bytes
-          while (SSRC.size > SSRC_MAX || ssrBytes > SSRC_BYTES) {
-            const oldest = SSRC.keys().next().value
-            ssrBytes -= SSRC.get(oldest).bytes
-            SSRC.delete(oldest)
-          }
+          rememberSSR(key, c)
+          await redisCache?.set(redisKey, c, n)
         }
         return c
       })
@@ -1364,13 +1432,27 @@ export function createServer(o = {}) {
     const running = FILLING.get(key)
     if (running) {
       c = await running
+      if (req.aborted || res.destroyed) return
       if (c?.cacheable) return serve(c)
       return ssr(req, res, route, params, url, rid, null, 200, null, true)
     }
     const kept = {}
-    const filling = fill(kept).finally(() => FILLING.delete(key))
+    const filling = (async () => {
+      const shared = await redisCache?.get(redisKey, n)
+      if (req.aborted || res.destroyed) return null
+      if (shared) {
+        rememberSSR(key, shared)
+        if (Date.now() - shared.t >= ms) {
+          shared.busy = true
+          fill().finally(() => { shared.busy = false })
+        }
+        return shared
+      }
+      return fill(kept)
+    })().finally(() => FILLING.delete(key))
     FILLING.set(key, filling)
     c = await filling
+    if (req.aborted || res.destroyed) return
     if (c) return serve(c)
     // the first render already asked the backend and logged why; another would only spend more of a limit it just hit
     if (req.$brainFailedReads?.temporary) return comeBackPage(req, res, route, params, url, rid)
@@ -1390,7 +1472,7 @@ export function createServer(o = {}) {
     res.setHeader('cache-control', 'no-store')
     return errorPage(req, res, route, params, url, rid, 503)
   }
-  const anonymous = req => (req.method === 'GET' || req.method === 'HEAD') && !req.headers.authorization && !req.headers.cookie
+  const anonymous = req => publicCacheRequest(req)
 
   const preloadHints = new WeakMap()
   async function ssr(req, res, route, params, url, rid, forms = null, status = 200, fixed = null, nocache = false) {
@@ -1606,7 +1688,10 @@ export function createServer(o = {}) {
   }
   // the head is already out: the folder's _error.brain (props { message, rid }) renders inside the region, else a notice
   async function failBody(route, url, rid) {
-    const notice = `<p role="alert" class="brain-fallback">Something went wrong. Reference: ${esc(rid)}</p>`
+    const options = errorOptions(null, route), word = errorWords(options.locale, options.dictionary)
+    const message = word('message', 'Something went wrong.'), reference = word('reference', 'Reference')
+    const label = part => part.lang ? `<span${part.lang}>${esc(part.text)}</span>` : esc(part.text)
+    const notice = `<p role="alert" class="brain-fallback">${label(message)} ${label(reference)}: ${esc(rid)}</p>`
     if (!route.error) return notice
     try {
       const props = { message: 'Something went wrong.', rid }, at = { path: url.pathname, params: {}, query: {} }
@@ -1810,7 +1895,7 @@ export function createServer(o = {}) {
     DYN.forEach((r, n) => {
         for (const p of lists[n]) {
           const path = fill(r.path, p)
-          if (!path) continue
+          if (!path || !r.rx.test(path)) continue
           const loc = origin + withBase(path)
           if (loc.length > 2048) log('warn', 'sitemap(): URL longer than 2048 characters left out; fix: shorten the slug', { view: r.view, loc: loc.slice(0, 120) })
           else if (urls.length < MAX_URLS) urls.push({ loc, lastmod: day(p.lastmod) })
@@ -2090,6 +2175,14 @@ export function createServer(o = {}) {
       if (ms > 1000) log('warn', 'slow request', { rid, path: req.$brainPath || String(req.url || '').split('?')[0], status: res.statusCode, ms: Math.round(ms) })
     })
     try {
+      // The URL parser erases literal/encoded dot segments and treats backslashes as separators.
+      // Constrained routing promises original segment matching, so reject those aliases before any
+      // canonical redirect or parser can turn them into a restricted candidate. Legacy dispatch stays unchanged.
+      if (mf.rawRouting === true) {
+        const target = req.url
+        const path = typeof target === 'string' ? target.split('?')[0] : ''
+        if (!path.startsWith('/') || path.startsWith('//') || /[\\#]/.test(path) || path.split('/').some(segment => /^(?:\.|%2e){1,2}$/i.test(segment))) return send(res, 403, 'Forbidden')
+      }
       // One URL per page: `//route`, `/a//b` and `/route/index.html` answer one 301 on this origin. The path is rewritten
       // as text, before URL parsing: `//host/x` would be read as another host. Backend paths are left to the backend.
       const variant = urlVariant(req)
@@ -2115,6 +2208,15 @@ export function createServer(o = {}) {
         url = new URL('/' + full.pathname.slice(BASE.length) + full.search, full) // the app path
       }
       req.$brainPath = url.pathname
+      if (url.pathname === '/_brain/sentry') {
+        if (!sentryReady || url.search) return notFound(req, res)
+        await sentryReady
+        return await sentryTunnel.handle(req, res, ipOf(req))
+      }
+      if (url.pathname === '/_brain/error.css') {
+        if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, '', { allow: 'GET, HEAD', 'content-type': MIME['.css'] })
+        return send(res, 200, ERROR_CSS + (compilerBranding ? '\n/* by BRAINLLM https://chrisifm.github.io/BRAINLLM/ */' : ''), { 'content-type': MIME['.css'], 'cache-control': 'public, max-age=300' })
+      }
       const probe = brainProbe(url.pathname)
       if (probe) return await answerProbe(req, res, new URL(probe, url), rid)
       if (native && /^\/_brain\/files(?:\/|$)/.test(url.pathname)) return await native.fileStream(req,res,url,rid)
@@ -2189,13 +2291,49 @@ export function createServer(o = {}) {
       }
     }
   })
+  if (sentryReady) {
+    const listen = server.listen
+    server.listen = function (...args) { sentryReady.then(() => { if (!sentryStopped) listen.apply(server, args) }, () => server.emit('error', Error('Sentry startup failed; verify private BRAIN_SENTRY_DSN and BRAIN_SENTRY_HOST'))); return server }
+    server.$brainSentryReady = sentryReady
+    const close = server.close, closeAll = server.closeAllConnections
+    const stop = () => { sentryStopped = true; sentryTunnel?.close() }
+    server.close = function (...args) { stop(); return close.apply(this, args) }
+    server.closeAllConnections = function (...args) { stop(); return closeAll.apply(this, args) }
+    server.once('close', stop)
+  }
   if (native) server.once('close', () => native.close())
+  if (redisCache) {
+    server.$brainCacheStop = () => redisCache.close()
+    const close = server.close, closeAll = server.closeAllConnections
+    server.close = function (...args) { redisCache.close(); return close.apply(this, args) }
+    server.closeAllConnections = function (...args) { redisCache.close(); return closeAll.apply(this, args) }
+    server.once('close', () => redisCache.close())
+  }
   if (native && nativeSockets) server.$brainSocketStop = installNativeSockets(server,{target:o.backendURL ?? env.BRAIN_BACKEND_URL,base:BASE,cookie:native._socketCookie,client:native._forwardedFor,log})
   server.headersTimeout = 15000
   // With a native backend the file upload deadline is enforced per request (above); 30 s stays for every other body.
   server.requestTimeout = native ? 320000 : 30000
   // `warm: true` (`node server.mjs`): import the app's modules now; requests that arrive meanwhile share the same imports
-  if (o.warm) server.$brainWarm = warm()
+  if (o.warm && SL.warmup === undefined) {
+    server.$brainWarm = sentryReady ? sentryReady.then(() => warm()) : warm()
+    server.$brainWarm.catch(() => {})
+  }
+  if (o.warm && SL.warmup !== undefined) {
+    let started
+    server.$brainDataWarmup = () => started ||= (async () => {
+      await sentryReady
+      const began = process.hrtime.bigint()
+      const {warmupSettings,runWarmup} = await import('./warmup.mjs')
+      const settings = warmupSettings(SL.warmup, routes, BASE, mf.site || env.PUBLIC_SITE_URL, mf.redirects)
+      const stats = await runWarmup({server,settings,warm,log,started:began,prepare(req, controller, state) {
+        req.$brainWarmupSignal = controller.signal
+        aborts.set(controller.signal, controller)
+        warmSignals.set(controller.signal, state)
+      }})
+      server.$brainWarm = Promise.resolve(stats)
+      return stats
+    })()
+  }
   return server
 }
 
@@ -2433,6 +2571,7 @@ Object.defineProperty(globalThis, '__brainLocale', { configurable: true, get: ()
 // ctx.signal: aborted when the client disconnects before the answer ends or the function passes its deadline, so the
 // work it started (fetch, a query) stops with it.
 const aborts = new WeakMap()
+const warmSignals = new WeakMap()
 const newSignal = () => {
   const c = new AbortController()
   aborts.set(c.signal, c)
@@ -2444,6 +2583,12 @@ const lifetime = res => {
   return signal
 }
 const withTimeout = (p, ms, ctx) => {
+  const startup = warmSignals.get(ctx?.signal)
+  if (startup) {
+    startup.pending.add(p)
+    Promise.resolve(p).then(() => startup.pending.delete(p), () => startup.pending.delete(p))
+    ms = Math.min(ms, Math.max(0, Number(startup.deadline - process.hrtime.bigint()) / 1e6))
+  }
   let t
   return Promise.race([p, new Promise((_, rej) => (t = setTimeout(() => {
     aborts.get(ctx?.signal)?.abort()
@@ -2948,13 +3093,32 @@ if (process.argv[1] && real(process.argv[1]) === real(fileURLToPath(import.meta.
     console.error(json({ t: new Date().toISOString(), level: 'error', msg: `cannot listen on ${where.host}:${port}: ${cause}`, fix }))
     process.exit(1)
   })
-  s.listen(where)
+  const beginListen = () => {
+    if (s.$brainDataWarmup) {
+      s.$brainDataWarmup().then(() => s.listen(where), async error => {
+        console.error(json({level:'error',event:'startup-warmup-failed',code:['WARMUP_CONFIG_INVALID','WARMUP_FAILED','WARMUP_TIMEOUT','WARMUP_DEADLINE'].includes(error?.code)?error.code:'WARMUP_FAILED',private:true,valuesCaptured:false,fix:'Configure exact public cached SSR paths and a valid site origin; inspect bounded startup warmup diagnostics'}))
+        s.$brainSocketStop?.(); s.$brainCacheStop?.()
+        s.closeAllConnections()
+        s.close()
+        process.exit(1)
+      })
+    } else s.listen(where)
+  }
+  if (s.$brainSentryReady) {
+    s.$brainSentryReady.then(beginListen, () => {
+      console.error(json({level:'error',event:'startup-configuration-failed',code:'SENTRY_CONFIG_INVALID',private:true,valuesCaptured:false,fix:'Configure private BRAIN_SENTRY_DSN and BRAIN_SENTRY_HOST before startup'}))
+      s.$brainSocketStop?.(); s.$brainCacheStop?.()
+      s.closeAllConnections(); s.close()
+      process.exit(1)
+    })
+  } else beginListen()
   // SIGTERM/SIGINT: stop accepting, answer what is in flight or arrives on open connections (each then closes), for up
   // to BRAIN_DRAIN_MS (10 s), then cut whatever is left; exit 0 either way
   const drain = () => {
     if (s.draining) return
     s.draining = true
     s.$brainSocketStop?.()
+    s.$brainCacheStop?.()
     const ms = +(ENV.BRAIN_DRAIN_MS || 10000)
     const force = setTimeout(() => {
       s.closeAllConnections()

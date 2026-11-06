@@ -55,3 +55,6 @@ mod native_openapi;
 mod native_sockets;
 #[path = "queues.rs"]
 mod queues;
+
+#[path = "vitals.rs"]
+mod vitals;

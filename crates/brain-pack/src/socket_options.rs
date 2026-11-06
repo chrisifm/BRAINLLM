@@ -4,6 +4,8 @@
 pub struct BuildOptions {
     /// Require portable HTML output with no request-time BRAINLLM server dependency.
     pub static_export: bool,
+    /// Independent explicit collector; supplied only after validating a fixed native backend.
+    pub native_vitals: Option<crate::NativeVitalsOptions>,
     pub native_sockets: Option<NativeSocketOptions>,
     /// `server/routes/*` the gateways may proxy: `(path, request headers the contract reads)`.
     pub native_routes: Vec<(String, Vec<String>)>,

@@ -293,7 +293,7 @@ pub(crate) fn apply_with_layout(root: &Path, cfg: &CacheCfg, pages: &[PageRef], 
     }
 
     // Separate deterministic metadata attributes binary/protocol assets without modifying their bytes or schemas.
-    files.insert("brain-build.json".into(),if layout.compiler_branding {format!("{{\"schemaVersion\":1,\"compilerBranding\":true,\"generator\":{{\"name\":\"BRAINLLM\",\"version\":{},\"url\":{}}},\"scope\":\"This generated build, including binary assets and compressed variants. Copied assets retain their own licenses and byte identity.\"}}\n",js(env!("CARGO_PKG_VERSION")),js(brain_lex::branding::HOME))}else{"{\"schemaVersion\":1,\"compilerBranding\":false}\n".into()});
+    files.insert("brain-build.json".into(),if layout.compiler_branding {format!("{{\"schemaVersion\":1,\"compilerBranding\":true,\"compilerBrandingScope\":{},\"generator\":{{\"name\":\"BRAINLLM\",\"version\":{},\"url\":{}}},\"scope\":\"This generated build, including binary assets and compressed variants. Copied assets retain their own licenses and byte identity.\"}}\n",js(if layout.compiler_branding_assets {"file"} else {"page"}),js(env!("CARGO_PKG_VERSION")),js(brain_lex::branding::HOME))}else{"{\"schemaVersion\":1,\"compilerBranding\":false}\n".into()});
     // 2. Build signature (§35.7): a hash of every file that ships, paths and bytes, sorted. ORDER MATTERS for a
     //    stable signature: it is computed here, BEFORE writing what carries it (the brain-build meta, the sw.js
     //    header, _headers, nginx.conf, the manifest's `build`) and before the registration snippet; those parts are

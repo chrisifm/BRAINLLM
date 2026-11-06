@@ -3,6 +3,9 @@ use crate::{Resource, auth::User};
 use serde_json::{Value, json};
 use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 
+/// Shared outer and owned-executor budget, including time queued for a blocking worker.
+pub const TIMEOUT: Duration = Duration::from_secs(2);
+
 #[derive(Clone, Debug)]
 pub enum HookFailure {
     Rejected(Vec<String>),
@@ -80,7 +83,7 @@ pub async fn execute(
     if serde_json::to_vec(&context).map_or(true, |bytes| bytes.len() > 65536) {
         return Err(HookFailure::Rejected(vec![]));
     }
-    let result = tokio::time::timeout(Duration::from_secs(2), executor.run(name, context))
+    let result = tokio::time::timeout(TIMEOUT, executor.run(name, context))
         .await
         .map_err(|_| HookFailure::Unavailable)??;
     if !bounded(&result) {

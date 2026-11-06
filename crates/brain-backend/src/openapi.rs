@@ -25,7 +25,7 @@ fn route_operation(route: &Route) -> Value {
     let mut parameters: Vec<Value> = route.params.iter().map(|(name, k)| json!({"name":name,"in":"path","required":true,"schema":kind(*k)})).collect();
     parameters.extend(route.query.iter().map(|(name, q)| json!({"name":name,"in":"query","required":q.required,"schema":kind(q.kind)})));
     parameters.extend(route.headers.iter().map(|name| json!({"name":name,"in":"header","required":false,"schema":{"type":"string"}})));
-    if let Some(verify) = &route.verify {
+    if let Some(verify) = route.verify.as_ref().filter(|verify|!verify.is_custom()) {
         parameters.push(json!({"name":verify.header,"in":"header","required":true,"schema":{"type":"string"},"description":"HMAC-SHA256 signature of the raw body"}));
     }
     let mut responses = json!({
@@ -53,7 +53,7 @@ fn route_operation(route: &Route) -> Value {
         "responses": responses,
         "x-brain-route": route.schema(),
     });
-    if !matches!(route.method.as_str(), "GET" | "DELETE") {
+    if route.method.as_str()!="GET" {
         let content = if route.raw_body {
             json!({"*/*":{"schema":{"type":"string","format":"binary","maxLength":route.body_limit}}})
         } else {
@@ -122,6 +122,19 @@ pub fn extend(doc: &mut Value, routes: &[Route], buckets: &[Bucket]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_verifiers_document_declared_headers_and_raw_delete_without_an_invented_hmac_header() {
+        let route=Route::from_contract("custom_events",&json!({"method":"DELETE","path":"/events/custom","auth":"public","body":"raw","headers":["x-signature","x-key-url"],"verify":{"scheme":"custom"}}),&|_|None).unwrap();
+        let op=route_operation(&route);
+        assert_eq!(op["x-brain-route"]["signed"],json!({"scheme":"custom"}));
+        assert_eq!(op["parameters"].as_array().unwrap().iter().map(|parameter|parameter["name"].as_str().unwrap()).collect::<Vec<_>>(),vec!["x-signature","x-key-url"]);
+        assert!(op["parameters"].as_array().unwrap().iter().all(|parameter|parameter["description"].is_null()));
+        assert_eq!(op["requestBody"]["required"],true);
+        assert!(op["requestBody"]["content"]["*/*"].is_object());
+        let ordinary=Route::from_contract("remove_item",&json!({"method":"DELETE","path":"/items/remove","auth":"public","body":"raw"}),&|_|None).unwrap();
+        assert!(route_operation(&ordinary)["requestBody"].is_object(),"DELETE body documentation follows the existing raw body behavior for every route");
+    }
 
     #[test]
     fn routes_and_buckets_become_documented_operations() {

@@ -658,7 +658,12 @@ fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
             .strip_prefix(&ctx.pre)
             .filter(|r| r.starts_with('/'))
         {
-            Some(r) => req.path = r.to_string(),
+            Some(r) => {
+                req.path = r.to_string();
+                if let Some(raw)=&mut req.upgrade.raw_path {
+                    if let Some(path)=raw.strip_prefix(&ctx.pre).filter(|p|p.starts_with('/')) {*raw=path.to_string();}
+                }
+            },
             None => {
                 let msg = format!(
                     "not found: this app is served under {}/ (brain.json \"base\")",
@@ -725,6 +730,20 @@ fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
             false,
             &extra,
         );
+    }
+    // Invalid constraints fail closed before route loads, forms, sitemap hooks or public-page fallback.
+    if let Err(error)=brain_pack::routes::validate_request_constraints(&ctx.root) {
+        return http::respond(&mut s,500,"text/plain; charset=utf-8",error.as_bytes(),req.method=="HEAD");
+    }
+    if req.method=="GET" || req.method=="HEAD" {
+        let rules=match brain_seo::redirects::load(&ctx.root) {Ok(r)=>r,Err((m,f))=>return http::respond(&mut s,500,"text/plain; charset=utf-8",format!("redirects.json: {m}; fix: {f}").as_bytes(),req.method=="HEAD")};
+        if !rules.is_empty() {
+            let cfg=match brain_seo::Config::load(&ctx.root){Ok(c)=>c,Err(error)=>return http::respond(&mut s,500,"text/plain; charset=utf-8",error.as_bytes(),req.method=="HEAD")};
+            let query=if req.query.is_empty(){String::new()}else{format!("?{}",req.query)};
+            if let Some((to,status))=brain_seo::redirects::resolve_request(&rules,&cfg.redirect_policy,&req.path,req.raw_path(),&query,req.header("host")) {
+                return http::respond_with(&mut s,status,"text/plain",b"",req.method=="HEAD",&[("Location",&ctx.under_base(&to))]);
+            }
+        }
     }
     // a form posted without JS to a page (§38): same handling as dist/server.mjs (callForm)
     if req.method == "POST"
@@ -964,7 +983,8 @@ fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
     let static_file = if file.is_dir() { file.join("index.html") } else { file.clone() };
     let i18n = brain_pack::read_i18n(&ctx.root);
     let (_, route_path) = split_locale(&i18n, &req.path);
-    let has_security_chain = public_file.is_some() && crate::route::resolve(&ctx.root, &route_path)
+    let (_,raw_route_path)=split_locale(&i18n,req.raw_path());
+    let has_security_chain = public_file.is_some() && crate::route::resolve_request(&ctx.root, &route_path,&raw_route_path)
         .filter(|route| !route.not_found)
         .is_some_and(|route| !chain_files(&ctx.root, &route.view, "_guard.jsbrain").is_empty()
             || !chain_files(&ctx.root, &route.view, "_middleware.jsbrain").is_empty());
@@ -1143,7 +1163,8 @@ fn dev_seo_renders(n: usize, spent: Duration) -> bool {
 /// alternates with x-default, and image entries for the view's static `<img src>` (dev renders on the client, so images
 /// bound to props only appear in the build).
 fn dev_seo(ctx: &Ctx, req: &http::Request) -> Option<(&'static str, String)> {
-    let mut cfg = brain_seo::Config::load(&ctx.root).unwrap_or_default();
+    let mut cfg = brain_seo::Config::load(&ctx.root).ok()?;
+    brain_pack::routes::constraints(&ctx.root,&brain_pack::routes::discover(&ctx.root)).ok()?;
     cfg.site = Some(format!("http://{}", req.header("host").unwrap_or("localhost")));
     cfg.staging = false;
     if req.path == "/robots.txt" {
@@ -1203,7 +1224,7 @@ fn dev_seo(ctx: &Ctx, req: &http::Request) -> Option<(&'static str, String)> {
                 .collect::<Vec<_>>()
                 .join("/");
             let lastmod = item.get("lastmod").and_then(brain_lex::Json::as_str).filter(|d| d.len() >= 10).map(|d| d[..10].to_string());
-            if ok {
+            if ok && cfg.route_allows(&r.path,&path) {
                 urls.push((path, lastmod, r.view.clone()));
             }
         }
@@ -1494,7 +1515,8 @@ fn app_page(ctx: &Ctx, req: &http::Request) -> (u16, String, Option<String>) {
             ));
         }
     }
-    let (status, slot) = match crate::route::resolve(root, &route_path) {
+    let (_,raw_route_path)=split_locale(&i18n,req.raw_path());
+    let (status, slot) = match crate::route::resolve_request(root, &route_path,&raw_route_path) {
         None => (
             404,
             format!(
@@ -2069,7 +2091,8 @@ fn form_post(s: &mut TcpStream, ctx: &Ctx, req: &http::Request) -> io::Result<()
     // `/es/contact` is the contact page in `es`: its schema messages come from es.json (§37), like the browser
     let i18n = brain_pack::read_i18n(&ctx.root);
     let (locale, route_path) = split_locale(&i18n, &req.path);
-    let Some(r) = crate::route::resolve(&ctx.root, &route_path) else {
+    let (_,raw_route_path)=split_locale(&i18n,req.raw_path());
+    let Some(r) = crate::route::resolve_request(&ctx.root, &route_path,&raw_route_path) else {
         return json(s, 404, "No page here");
     };
     let dict = match (&locale, &i18n) {
@@ -2136,7 +2159,7 @@ fn form_post(s: &mut TcpStream, ctx: &Ctx, req: &http::Request) -> io::Result<()
         Ok((422, _, state, _, _)) => {
             // re-render the page as a GET, then hand form() its state (values + errors)
             let get = http::Request {
-                upgrade: Default::default(),
+                upgrade: http::UpgradeMetadata {raw_path:Some(req.raw_path().into()),..Default::default()},
                 method: "GET".into(),
                 path: req.path.clone(),
                 query: req.query.clone(),
@@ -2199,7 +2222,7 @@ fn runtime_file(ctx: &Ctx, name: &str) -> Option<String> {
 /// production share the request handling); its `file://` URL.
 fn runtime_server(ctx: &Ctx) -> Option<String> {
     let (_, src) = ctx.runtime.iter().find(|(n, _)| n == "server/server.mjs")?;
-    for file in ["native-sockets.mjs", "llm.mjs"] {
+    for file in ["native-sockets.mjs", "llm.mjs", "redis-cache.mjs"] {
         if !src.contains(&format!("from './{file}'")) {
             continue;
         }
@@ -3316,7 +3339,7 @@ mod admission_tests {
             server: brain_lex::ServerMetadata { rpc: if source == "owned" { vec!["abc123/save".into()] } else { vec![] }, ..Default::default() },
         }));
         let opts = Options { root: root.clone(), host: "127.0.0.1".into(), port: 0, head_prepend: String::new(),
-            runtime: vec![("server/server.mjs".into(), include_str!("../../../runtime/server/server.mjs").into()), ("server/native-sockets.mjs".into(), include_str!("../../../runtime/server/native-sockets.mjs").into()), ("server/llm.mjs".into(), include_str!("../../../runtime/server/llm.mjs").into())], env: None, base: "/".into(), diagnose: None, problems: None, upstream: None, mock: None };
+            runtime: vec![("server/server.mjs".into(), include_str!("../../../runtime/server/server.mjs").into()), ("server/native-sockets.mjs".into(), include_str!("../../../runtime/server/native-sockets.mjs").into()), ("server/llm.mjs".into(), include_str!("../../../runtime/server/llm.mjs").into()), ("server/redis-cache.mjs".into(), include_str!("../../../runtime/server/redis-cache.mjs").into())], env: None, base: "/".into(), diagnose: None, problems: None, upstream: None, mock: None };
         let dev = start_dev(opts, compiler, false, None).unwrap();
         let call = |name: &str| {
             let mut client = TcpStream::connect(dev.addr).unwrap();
@@ -3367,7 +3390,7 @@ mod admission_tests {
         std::fs::write(root.join("public/.well-known/verification"), "well-known-verification").unwrap();
         let compiler: CompileFn = Arc::new(|src, path| Ok(Compiled { server: Default::default(),js: String::new(), css: String::new(), deps: vec![], server_js: if path.extension().is_some_and(|ext|ext=="jsbrain") {src.into()} else {String::new()}}));
         let opts = Options { root: root.clone(), host: "127.0.0.1".into(), port:0, head_prepend:String::new(),
-            runtime:vec![("server/server.mjs".into(), include_str!("../../../runtime/server/server.mjs").into()), ("server/native-sockets.mjs".into(), include_str!("../../../runtime/server/native-sockets.mjs").into()), ("server/llm.mjs".into(), include_str!("../../../runtime/server/llm.mjs").into())], env:None, base:"/".into(), diagnose:None, problems:None, upstream:None, mock:None };
+            runtime:vec![("server/server.mjs".into(), include_str!("../../../runtime/server/server.mjs").into()), ("server/native-sockets.mjs".into(), include_str!("../../../runtime/server/native-sockets.mjs").into()), ("server/llm.mjs".into(), include_str!("../../../runtime/server/llm.mjs").into()), ("server/redis-cache.mjs".into(), include_str!("../../../runtime/server/redis-cache.mjs").into())], env:None, base:"/".into(), diagnose:None, problems:None, upstream:None, mock:None };
         let dev = start_dev(opts, compiler, false, None).unwrap();
         for (path, value) in [("/verification", "public-verification"), ("/.well-known/verification", "well-known-verification")] {
             for method in ["GET", "HEAD"] {
