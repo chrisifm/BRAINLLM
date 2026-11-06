@@ -313,3 +313,47 @@ async fn postgres_stats_report_oldest_wait_and_live_workers() {
     q.leave(ghost).await.unwrap();
     sqlx::query("DELETE FROM _brain_jobs WHERE queue=$1").bind(&name).execute(&pool).await.unwrap();
 }
+
+/// Pool contention before SQL must not kill a worker or consume a job attempt.
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn postgres_worker_recovers_from_pre_sql_pool_contention() {
+    let control = pool().await;
+    let url = std::env::var("BRAIN_BACKEND_TEST_URL").unwrap();
+    let worker_pool = sqlx::postgres::PgPoolOptions::new().max_connections(1)
+        .acquire_timeout(Duration::from_millis(100)).connect(&url).await.unwrap();
+    let queue = queue_name("recover");
+    let id = jobs::Queue::new(control.clone()).enqueue(&queue, json!({}), None, 3).await.unwrap();
+    let held = worker_pool.acquire().await.unwrap();
+    let q = jobs::Queue::new(worker_pool.clone());
+    let (send, stop) = tokio::sync::watch::channel(false);
+    let (entered, received) = tokio::sync::oneshot::channel();
+    let (ran, mut runs) = tokio::sync::mpsc::channel(2);
+    let task = tokio::spawn({
+        let queue = queue.clone();
+        async move {
+            let _ = entered.send(());
+            q.work(&queue, 1, stop, move |job| {
+                let ran = ran.clone();
+                async move { let _ = ran.send((job.id, job.attempt)).await; Ok(()) }
+            }).await
+        }
+    });
+    received.await.unwrap();
+    // Deliberately span startup's failed liveness write and multiple 100 ms acquisition windows.
+    // This is the fault duration, not a readiness heuristic; the only connection stays held throughout it.
+    tokio::time::sleep(Duration::from_millis(450)).await;
+    assert!(!task.is_finished(), "a worker must survive temporary pre-SQL pool contention");
+    let attempts: i32 = sqlx::query_scalar("SELECT attempts FROM _brain_jobs WHERE id=$1")
+        .bind(id).fetch_one(&control).await.unwrap();
+    assert_eq!(attempts, 0);
+    drop(held);
+    assert_eq!(tokio::time::timeout(Duration::from_secs(3), runs.recv()).await.unwrap(), Some((id, 1)));
+    assert!(collect(&control, &queue, 1, Duration::from_secs(3)).await);
+    send.send(true).unwrap();
+    tokio::time::timeout(Duration::from_secs(3), task).await.unwrap().unwrap().unwrap();
+    assert!(runs.try_recv().is_err(), "one acquisition recovery must not duplicate execution");
+    sqlx::query("DELETE FROM _brain_jobs WHERE id=$1").bind(id).execute(&control).await.unwrap();
+    worker_pool.close().await;
+    control.close().await;
+}

@@ -2325,6 +2325,20 @@ return the same additive evidence. Rendered behavior, screenshots and field vita
 
 ## 44. Experimental Rust backend and durable work (2026-10-29)
 
+Database failure attribution (2026-11-06): direct and contextual diagnostics share finite driver kinds and
+fixed actionable fixes. Connection failures additionally expose an allowlisted I/O kind. SQLSTATE categories
+and public error text remain unchanged; this classification never formats driver messages, bound values,
+column names, connection credentials or arbitrary nested sources. A null SQLSTATE does not identify a
+pool timeout; the driver kind is independent evidence.
+
+Queue recovery is limited to explicit pre-claim connection acquisition: three attempts, one 15-second deadline,
+and 250/500 ms pauses, all cancellable. A checked-out connection serves both claim statements, which are never
+replayed on error. The public claim API remains fail-fast. Renewals are bounded by one second as well as the
+attempt/drain deadline; uncertainty cancels the handler without ack/release. Final ack/fail and worker-row cleanup
+each have a one-second bound. Drop guards abort liveness and listener tasks on normal or external cancellation.
+Regression tests retain a real pool slot, confirm real PostgreSQL row-lock waits and observe listener connections;
+synthetic errors separately cover retry admission, finite exhaustion, cancellation and diagnostic privacy.
+
 Computed backfills (2026-11-06): migration0029 owns the immutable database identity and per-definition checkpoint.
 `brain-cli/src/backfill.rs` translates a bounded existing BrainScript AST into typed `brain-backend/src/backfill.rs`
 operations; it never evaluates JS. Preview is repeatable-read READ ONLY without DDL. Apply holds the shared migration

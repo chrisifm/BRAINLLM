@@ -1,0 +1,19 @@
+{
+  "id": "worker-database-resilience",
+  "kind": "fix",
+  "title": "Bounded worker database recovery and diagnostics",
+  "why": "Workers tolerate temporary connection-pool contention before claiming work, retain safe driver causes and honor shutdown deadlines without replaying uncertain mutations.",
+  "changelog": [
+    "Worker database diagnostics retain finite driver causes",
+    "Workers recover from bounded pre-SQL pool contention",
+    "Worker lease renewal and final database cleanup have finite deadlines"
+  ],
+  "guide": "docs/backend/queues.md",
+  "apis": [
+    "brain jobs work",
+    "Queue::work_with"
+  ],
+  "affects": [
+    "server/jobs/**"
+  ]
+}

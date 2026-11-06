@@ -87,6 +87,25 @@ For a small deployment, `brain backend serve --with-workers` starts one `brain j
 drain, and a child stops by itself if its server is killed. Use separate processes when workers must scale apart from
 the API.
 
+## Database failures and shutdown
+
+Before claiming a job, a worker may retry a connection-pool timeout up to three acquisition attempts within one
+15-second budget, pausing 250 ms and then 500 ms. Shutdown cancels both acquisition and backoff. No claim SQL runs
+until a connection is acquired, so this recovery consumes no job attempt. The public Rust `Queue::claim` remains
+fail-fast. A closed pool, another driver error or a failure after SQL begins is not retried by this mechanism.
+
+Private `database-operation-failed` events include a finite `kind` and suggested `fix`; connection errors also
+include `ioKind`. Queue operations add fixed `operation` and `phase` labels. The `query` phase includes driver
+checkout as well as execution; only the separate claim acquisition phase proves that no claim SQL was sent.
+A null SQLSTATE alone does not identify the cause. Driver messages, credentials and job payloads are omitted.
+
+A lease renewal waits at most one second and still observes the attempt timeout and shutdown drain. If renewal
+is uncertain, the handler is canceled without acknowledging or releasing that lease; expiry makes the job
+eligible again. A final acknowledgment or failure update gets at most one second, and worker-row cleanup gets
+one more second. A timeout does not replay an uncertain write. Background liveness and LISTEN tasks are owned
+by the worker and canceled when it is dropped. Persistent acquisition failure and other fatal database errors
+still stop the worker so its process manager can report and restart it. Handlers must remain idempotent.
+
 ## Semantics
 
 - **Idempotency:** `--key` (or `Enqueue { key }`) returns the existing job id for a repeated key on the same queue.

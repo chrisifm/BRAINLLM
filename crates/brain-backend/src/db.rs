@@ -941,7 +941,54 @@ pub(crate) fn sqlstate(error: &sqlx::Error) -> Option<String> {
         })
         .map(|code| code.into_owned())
 }
+/// Finite driver classifications shared by direct and contextual diagnostics. Never inspect error text.
+fn driver_failure(error: &sqlx::Error) -> (&'static str, &'static str) {
+    match error {
+        sqlx::Error::Database(_) => ("database", "Inspect the SQLSTATE and the database server diagnostics"),
+        sqlx::Error::PoolTimedOut => ("pool timeout", "Inspect pool occupancy, long transactions and connection establishment failures"),
+        sqlx::Error::PoolClosed => ("pool closed", "Inspect shutdown ordering and use of a closed database pool"),
+        sqlx::Error::Io(_) => ("connection", "Inspect database availability, connection limits and the network path"),
+        sqlx::Error::Tls(_) => ("tls", "Verify the database TLS mode, certificate trust and certificate validity"),
+        sqlx::Error::Protocol(_) => ("protocol", "Inspect database protocol compatibility and connection health"),
+        sqlx::Error::Configuration(_) | sqlx::Error::ConfigFile(_) => ("configuration", "Validate database connection configuration without logging credentials"),
+        sqlx::Error::InvalidArgument(_) => ("invalid argument", "Check the database operation arguments against the driver contract"),
+        sqlx::Error::RowNotFound => ("row not found", "Check whether the operation should accept a missing row"),
+        sqlx::Error::TypeNotFound { .. } => ("type not found", "Check declared database types and migration state"),
+        sqlx::Error::ColumnIndexOutOfBounds { .. } => ("column index", "Check projected columns against positional row decoding"),
+        sqlx::Error::ColumnNotFound(_) => ("column not found", "Check projected columns against named row decoding"),
+        sqlx::Error::ColumnDecode { .. } | sqlx::Error::Decode(_) => ("decode", "Check projected database types against the expected result types"),
+        sqlx::Error::Encode(_) => ("encode", "Check bound argument types against the database operation"),
+        sqlx::Error::AnyDriverError(_) => ("driver mapping", "Check native driver type mappings"),
+        sqlx::Error::WorkerCrashed => ("driver worker", "Inspect the database driver worker lifecycle and process diagnostics"),
+        sqlx::Error::Migrate(_) => ("migration", "Inspect migration status and the failed migration before changing database state"),
+        sqlx::Error::InvalidSavePointStatement => ("savepoint", "Check transaction nesting before opening a transaction with custom options"),
+        sqlx::Error::BeginFailed => ("transaction begin", "Inspect the connection transaction state before starting more work"),
+        _ => ("driver", "Inspect database driver diagnostics and operation context"),
+    }
+}
+fn io_failure_kind(error: &std::io::Error) -> &'static str {
+    use std::io::ErrorKind;
+    match error.kind() {
+        ErrorKind::ConnectionRefused => "connection refused",
+        ErrorKind::ConnectionReset => "connection reset",
+        ErrorKind::ConnectionAborted => "connection aborted",
+        ErrorKind::NotConnected => "not connected",
+        ErrorKind::BrokenPipe => "broken pipe",
+        ErrorKind::TimedOut => "timed out",
+        ErrorKind::UnexpectedEof => "unexpected eof",
+        ErrorKind::NetworkUnreachable => "network unreachable",
+        ErrorKind::HostUnreachable => "host unreachable",
+        ErrorKind::PermissionDenied => "permission denied",
+        ErrorKind::Interrupted => "interrupted",
+        ErrorKind::WouldBlock => "would block",
+        ErrorKind::InvalidData => "invalid data",
+        _ => "other",
+    }
+}
 fn failure_metadata(error: &sqlx::Error) -> Value {
+    failure_metadata_at(error, None)
+}
+fn failure_metadata_at(error: &sqlx::Error, context: Option<(&'static str, &'static str)>) -> Value {
     // Never format an error, SQL text, URL or bound value.
     let code = sqlstate(error);
     let category = match code.as_deref() {
@@ -956,11 +1003,27 @@ fn failure_metadata(error: &sqlx::Error) -> Value {
         Some("28000" | "28P01") => "database refused the connection",
         _ => "database operation",
     };
-    json!({"schemaVersion":1,"event":"database-operation-failed","rid":crate::http::request_reference(),"sqlstate":code,"category":category,"private":true,"valuesCaptured":false})
+    let (kind, fix) = driver_failure(error);
+    let mut metadata = json!({"schemaVersion":1,"event":"database-operation-failed","rid":crate::http::request_reference(),"sqlstate":code,"category":category,"kind":kind,"fix":fix,"private":true,"valuesCaptured":false});
+    if let sqlx::Error::Io(error) = error {
+        metadata["ioKind"] = json!(io_failure_kind(error));
+    }
+    if let Some((operation, phase)) = context {
+        metadata["operation"] = json!(operation);
+        metadata["phase"] = json!(phase);
+    }
+    metadata
 }
 pub fn safe(error: sqlx::Error) -> String {
+    safe_at(error, None)
+}
+/// Adds fixed framework operation and phase labels, never app identifiers or error text.
+pub(crate) fn safe_operation(error: sqlx::Error, operation: &'static str, phase: &'static str) -> String {
+    safe_at(error, Some((operation, phase)))
+}
+fn safe_at(error: sqlx::Error, context: Option<(&'static str, &'static str)>) -> String {
     crate::platform::note_database_error(&error);
-    let metadata = failure_metadata(&error);
+    let metadata = failure_metadata_at(&error, context);
     diagnostic(&metadata);
     format!(
         "Postgres {} failed; inspect sanitized server diagnostics",
@@ -1052,17 +1115,6 @@ pub(crate) fn log_failure(error: &sqlx::Error, at: &std::panic::Location<'_>, co
             event["message"] = json!(database.message());
             event["valuesCaptured"] = json!(true);
         }
-    } else {
-        event["kind"] = json!(match error {
-            sqlx::Error::PoolTimedOut => "pool timeout",
-            sqlx::Error::PoolClosed => "pool closed",
-            sqlx::Error::Io(_) => "connection",
-            sqlx::Error::Tls(_) => "tls",
-            sqlx::Error::RowNotFound => "row not found",
-            sqlx::Error::ColumnDecode { .. } | sqlx::Error::Decode(_) => "decode",
-            sqlx::Error::Protocol(_) => "protocol",
-            _ => "driver",
-        });
     }
     diagnostic(&event);
 }
@@ -1497,6 +1549,144 @@ pub async fn rebuild_search(
 #[cfg(test)]
 mod private_failure_tests {
     use super::*;
+
+    const PRIVATE_VALUE: &str = "synthetic-private-driver-message";
+    fn private_error() -> Box<dyn std::error::Error + Send + Sync> {
+        std::io::Error::other(PRIVATE_VALUE).into()
+    }
+
+    #[test]
+    fn non_database_failures_retain_actionable_finite_causes_without_driver_values() {
+        let cases = [
+            (sqlx::Error::PoolTimedOut, "pool timeout"),
+            (sqlx::Error::PoolClosed, "pool closed"),
+            (sqlx::Error::Tls(private_error()), "tls"),
+            (sqlx::Error::Protocol(PRIVATE_VALUE.into()), "protocol"),
+            (sqlx::Error::Configuration(private_error()), "configuration"),
+            (sqlx::Error::InvalidArgument(PRIVATE_VALUE.into()), "invalid argument"),
+            (sqlx::Error::RowNotFound, "row not found"),
+            (sqlx::Error::TypeNotFound { type_name: PRIVATE_VALUE.into() }, "type not found"),
+            (sqlx::Error::ColumnIndexOutOfBounds { index: 987654321, len: 123456789 }, "column index"),
+            (sqlx::Error::ColumnNotFound(PRIVATE_VALUE.into()), "column not found"),
+            (sqlx::Error::ColumnDecode { index: PRIVATE_VALUE.into(), source: private_error() }, "decode"),
+            (sqlx::Error::Decode(private_error()), "decode"),
+            (sqlx::Error::Encode(private_error()), "encode"),
+            (sqlx::Error::AnyDriverError(private_error()), "driver mapping"),
+            (sqlx::Error::WorkerCrashed, "driver worker"),
+            (sqlx::Error::Migrate(Box::new(sqlx::migrate::MigrateError::Source(private_error()))), "migration"),
+            (sqlx::Error::InvalidSavePointStatement, "savepoint"),
+            (sqlx::Error::BeginFailed, "transaction begin"),
+        ];
+        for (error, kind) in cases {
+            let metadata = failure_metadata(&error);
+            assert_eq!(metadata["kind"], kind);
+            assert_eq!(metadata["category"], "database operation");
+            assert_eq!(metadata["sqlstate"], Value::Null);
+            assert_eq!(metadata["valuesCaptured"], false);
+            assert!(metadata["fix"].as_str().is_some_and(|fix| !fix.is_empty()));
+            assert!(metadata.get("ioKind").is_none());
+            let serialized = metadata.to_string();
+            assert!(!serialized.contains(PRIVATE_VALUE));
+            assert!(!serialized.contains("987654321") && !serialized.contains("123456789"));
+            assert_eq!(safe(error), "Postgres database operation failed; inspect sanitized server diagnostics");
+        }
+    }
+
+    #[test]
+    fn operation_context_keeps_fixed_labels_without_changing_public_errors() {
+        let error = sqlx::Error::Io(std::io::Error::new(std::io::ErrorKind::ConnectionReset, PRIVATE_VALUE));
+        let metadata = failure_metadata_at(&error, Some(("queue.claim", "acquire")));
+        assert_eq!(metadata["operation"], "queue.claim");
+        assert_eq!(metadata["phase"], "acquire");
+        assert_eq!(metadata["kind"], "connection");
+        assert_eq!(metadata["ioKind"], "connection reset");
+        assert_eq!(metadata["valuesCaptured"], false);
+        assert!(!metadata.to_string().contains(PRIVATE_VALUE));
+        assert!(failure_metadata(&error).get("operation").is_none());
+        assert!(failure_metadata(&error).get("phase").is_none());
+        assert_eq!(safe_operation(error, "queue.claim", "acquire"),
+            "Postgres database operation failed; inspect sanitized server diagnostics");
+    }
+
+    #[tokio::test]
+    async fn operation_context_preserves_request_pool_saturation_evidence() {
+        let (message, saturated) = crate::platform::watch_pool(async {
+            safe_operation(sqlx::Error::PoolTimedOut, "queue.claim", "acquire")
+        }).await;
+        assert!(saturated);
+        assert_eq!(message, "Postgres database operation failed; inspect sanitized server diagnostics");
+    }
+
+    #[test]
+    fn connection_failures_distinguish_io_kinds_without_formatting_the_source() {
+        use std::io::ErrorKind;
+        for (io_kind, expected) in [
+            (ErrorKind::ConnectionRefused, "connection refused"),
+            (ErrorKind::ConnectionReset, "connection reset"),
+            (ErrorKind::ConnectionAborted, "connection aborted"),
+            (ErrorKind::NotConnected, "not connected"),
+            (ErrorKind::BrokenPipe, "broken pipe"),
+            (ErrorKind::TimedOut, "timed out"),
+            (ErrorKind::UnexpectedEof, "unexpected eof"),
+            (ErrorKind::NetworkUnreachable, "network unreachable"),
+            (ErrorKind::HostUnreachable, "host unreachable"),
+            (ErrorKind::PermissionDenied, "permission denied"),
+            (ErrorKind::Interrupted, "interrupted"),
+            (ErrorKind::WouldBlock, "would block"),
+            (ErrorKind::InvalidData, "invalid data"),
+            (ErrorKind::Other, "other"),
+        ] {
+            let error = sqlx::Error::Io(std::io::Error::new(io_kind, PRIVATE_VALUE));
+            let metadata = failure_metadata(&error);
+            assert_eq!(metadata["kind"], "connection");
+            assert_eq!(metadata["ioKind"], expected);
+            assert_eq!(metadata["sqlstate"], Value::Null);
+            assert!(!metadata.to_string().contains(PRIVATE_VALUE));
+        }
+    }
+
+    #[derive(Debug)]
+    struct PrivateDatabaseError(&'static str);
+    impl std::fmt::Display for PrivateDatabaseError {
+        fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            out.write_str(PRIVATE_VALUE)
+        }
+    }
+    impl std::error::Error for PrivateDatabaseError {}
+    impl sqlx::error::DatabaseError for PrivateDatabaseError {
+        fn message(&self) -> &str { PRIVATE_VALUE }
+        fn code(&self) -> Option<std::borrow::Cow<'_, str>> { Some(self.0.into()) }
+        fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) { self }
+        fn as_error_mut(&mut self) -> &mut (dyn std::error::Error + Send + Sync + 'static) { self }
+        fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> { self }
+        fn kind(&self) -> sqlx::error::ErrorKind { sqlx::error::ErrorKind::Other }
+    }
+
+    #[test]
+    fn database_classification_remains_compatible_and_rejects_non_sqlstate_values() {
+        for (code, category) in [
+            ("57014", "statement deadline"),
+            ("25P04", "transaction deadline"),
+            ("25P03", "idle transaction deadline"),
+            ("55P03", "lock deadline"),
+            ("23505", "unique constraint"),
+            ("23503", "reference constraint"),
+            ("23001", "reference constraint"),
+            ("23514", "check constraint"),
+            ("42501", "database privilege"),
+            ("28000", "database refused the connection"),
+            ("28P01", "database refused the connection"),
+            ("XX000", "database operation"),
+            (PRIVATE_VALUE, "database operation"),
+        ] {
+            let error = sqlx::Error::Database(Box::new(PrivateDatabaseError(code)));
+            let metadata = failure_metadata(&error);
+            assert_eq!(metadata["category"], category);
+            assert_eq!(metadata["kind"], "database");
+            assert_eq!(metadata["sqlstate"], if code == PRIVATE_VALUE { Value::Null } else { json!(code) });
+            assert!(!metadata.to_string().contains(PRIVATE_VALUE));
+        }
+    }
     #[test]
     fn driver_messages_and_values_never_enter_private_metadata_or_public_error() {
         let metadata = failure_metadata(&sqlx::Error::Protocol(
