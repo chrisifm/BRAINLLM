@@ -37,31 +37,21 @@ fn dev_navigation_moves_focus_and_announces_the_title() {
         let _ = p.kill();
         return;
     }
-    let probe = r#"{"expr":"new Promise(r=>setTimeout(()=>r(document.activeElement.tagName+'|'+(document.getElementById('brain-announce')?.textContent??'none')+'|'+(document.getElementById('brain-announce')?.getAttribute('aria-live')??'none')+'|'+location.pathname),700))"}"#;
-    // Before the dev router is up, navigate() is a normal page load by design.
+    let probe = r#"{"expr":"new Promise(r=>setTimeout(()=>r(document.activeElement.tagName+'|'+(document.getElementById('brain-announce')?.textContent??'none')+'|'+(document.getElementById('brain-announce')?.getAttribute('aria-live')??'none')+'|'+location.pathname+'|'+(globalThis.__brainNavigationDocument??'replaced')),700))"}"#;
+    // Keep an identity outside the mounted view: either client navigation must preserve this document.
     let router_ready = r#"{"expr":"new Promise(r=>{const t=setInterval(()=>{if(window.__brainDevGo){clearInterval(t);r('router-ready')}},20)})"}"#;
     let ready = tool(&mut call, "brain_eval", router_ready);
     assert!(ready.contains("router-ready"), "{ready}");
+    let marked = tool(&mut call, "brain_eval", r#"{"expr":"globalThis.__brainNavigationDocument='same-document'"}"#);
+    assert!(marked.contains("same-document"), "{marked}");
     let clicked = tool(&mut call, "brain_click", r##"{"selector":"#b"}"##);
     assert!(!clicked.contains("isError\":true"), "{clicked}");
-    let mut after_navigate = tool(&mut call, "brain_eval", probe);
-    // A full page load can land on the pending probe on a loaded CI host (seen on Linux only, cause still open): say which
-    // kind it was and drive the client navigation once more. The assertions on focus and the announcement stay as they are.
-    let mut full_load = String::new();
-    if after_navigate.contains("context destroyed") {
-        full_load = tool(&mut call, "brain_eval", r#"{"expr":"performance.getEntriesByType('navigation')[0].type+' '+location.pathname"}"#);
-        assert!(!tool(&mut call, "brain_navigate", r#"{"route":"/go"}"#).contains("isError\":true"));
-        let ready = tool(&mut call, "brain_eval", router_ready);
-        assert!(ready.contains("router-ready"), "{ready}");
-        let clicked = tool(&mut call, "brain_click", r##"{"selector":"#b"}"##);
-        assert!(!clicked.contains("isError\":true"), "{clicked}");
-        after_navigate = tool(&mut call, "brain_eval", probe);
-    }
-    assert!(after_navigate.contains("H1|Posts") && after_navigate.contains("polite|/posts"), "navigate(): {after_navigate} (earlier full load: {full_load})");
+    let after_navigate = tool(&mut call, "brain_eval", probe);
+    assert!(after_navigate.contains("H1|Posts") && after_navigate.contains("polite|/posts|same-document"), "navigate(): {after_navigate}");
     let clicked = tool(&mut call, "brain_click", r#"{"selector":"nav a[href='/about']"}"#);
     assert!(!clicked.contains("isError\":true"), "{clicked}");
     let after_link = tool(&mut call, "brain_eval", probe);
-    assert!(after_link.contains("H1|About") && after_link.contains("polite|/about"), "link: {after_link}");
+    assert!(after_link.contains("H1|About") && after_link.contains("polite|/about|same-document"), "link: {after_link}");
     let _ = p.kill();
     let _ = std::fs::remove_dir_all(&tmp);
 }

@@ -9,6 +9,17 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-11-05
+
+Includes the typed input, server helper, discovery metadata, shutdown and migration preview fixes recorded under
+0.9.1. That source tag was withheld from npm after its repeated Linux source verification failed.
+
+- Filter filesystem access notifications before the bounded dev watcher queue, so source reads cannot cause false overflow recovery and reload a document during client navigation. Real mutation overflow still triggers recovery, and watcher errors retain their existing handling.
+
+### Tests
+
+- Navigation focus acceptance verifies both the heading and polite announcement within the original document for button and link navigation; an unexpected full reload fails immediately instead of retrying the action.
+
 ## [0.9.1] - 2026-11-05
 
 - Typed action, transition and operation inputs accept record metadata names such as `id` as ordinary values; `$input.id` resolves within the input namespace while resource columns and JavaScript prototype names retain their restrictions.
@@ -1413,7 +1424,8 @@ These checkout snapshots are not release-binary performance benchmarks.
 - First public npm release for seven native platforms (macOS arm64/x64, Linux x64/arm64/musl, Windows x64/arm64),
   the runtime and the `npm create @christianirack/brainllm` and `npm create @christianirack/brainll` initializers (#5).
 
-[Unreleased]: https://github.com/chrisifm/BRAINLLM/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/chrisifm/BRAINLLM/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/chrisifm/BRAINLLM/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/chrisifm/BRAINLLM/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/chrisifm/BRAINLLM/compare/v0.8.12...v0.9.0
 [0.4.0]: https://github.com/chrisifm/BRAINLLM/compare/v0.3.1...v0.4.0

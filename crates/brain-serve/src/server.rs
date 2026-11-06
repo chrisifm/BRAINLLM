@@ -2688,17 +2688,23 @@ fn ignored(rel: &Path) -> bool {
     })
 }
 
+fn queue_watch_event(tx: &std::sync::mpsc::SyncSender<notify::Result<notify::Event>>, overflow: &AtomicBool, event: notify::Result<notify::Event>) {
+    // Linux reports source reads too. Discard them before the bounded mutation queue: overflowing on
+    // access events would turn ordinary compilation/imports into a full document reload.
+    if matches!(&event, Ok(event) if event.kind.is_access()) {
+        return;
+    }
+    if matches!(tx.try_send(event), Err(std::sync::mpsc::TrySendError::Full(_))) {
+        overflow.store(true, Ordering::Release);
+    }
+}
+
 fn start_watch(ctx: Arc<Ctx>, threads: &Threads) -> io::Result<notify::RecommendedWatcher> {
     let (tx, rx) = std::sync::mpsc::sync_channel(64);
     let overflow = Arc::new(AtomicBool::new(false));
     let overflowed = overflow.clone();
     let mut w = notify::recommended_watcher(move |event| {
-        if matches!(
-            tx.try_send(event),
-            Err(std::sync::mpsc::TrySendError::Full(_))
-        ) {
-            overflowed.store(true, Ordering::Release);
-        }
+        queue_watch_event(&tx, &overflowed, event);
     })
     .map_err(io::Error::other)?;
     w.watch(&ctx.root, RecursiveMode::Recursive)
@@ -2901,6 +2907,43 @@ fn on_change(ctx: &Ctx, path: &Path) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn watch_access_bursts_do_not_consume_mutation_capacity_or_force_reload() {
+        use notify::event::{AccessKind, ModifyKind};
+        let (tx, rx) = std::sync::mpsc::sync_channel(64);
+        let overflow = AtomicBool::new(false);
+        for _ in 0..256 {
+            queue_watch_event(&tx, &overflow, Ok(notify::Event::new(notify::EventKind::Access(AccessKind::Read))));
+        }
+        assert!(!overflow.load(Ordering::Acquire), "reading source must not signal lost mutations or reload the document");
+        assert!(rx.try_recv().is_err(), "access events must not occupy the bounded mutation queue");
+        let changed = notify::Event::new(notify::EventKind::Modify(ModifyKind::Any));
+        queue_watch_event(&tx, &overflow, Ok(changed.clone()));
+        assert_eq!(rx.try_recv().unwrap().unwrap(), changed);
+        for _ in 0..65 {
+            queue_watch_event(&tx, &overflow, Ok(changed.clone()));
+        }
+        assert!(overflow.load(Ordering::Acquire), "lost real mutations must retain full reload recovery");
+    }
+
+    #[test]
+    fn watch_access_filter_preserves_errors_and_all_mutation_families() {
+        use notify::event::{AccessKind, AccessMode, CreateKind, ModifyKind, RemoveKind};
+        let (tx, rx) = std::sync::mpsc::sync_channel(8);
+        let overflow = AtomicBool::new(false);
+        for access in [AccessKind::Any, AccessKind::Read, AccessKind::Open(AccessMode::Read), AccessKind::Close(AccessMode::Write), AccessKind::Other] {
+            queue_watch_event(&tx, &overflow, Ok(notify::Event::new(notify::EventKind::Access(access))));
+        }
+        assert!(rx.try_recv().is_err());
+        for kind in [notify::EventKind::Any, notify::EventKind::Create(CreateKind::Any), notify::EventKind::Modify(ModifyKind::Any), notify::EventKind::Remove(RemoveKind::Any), notify::EventKind::Other] {
+            queue_watch_event(&tx, &overflow, Ok(notify::Event::new(kind)));
+            assert_eq!(rx.try_recv().unwrap().unwrap().kind, kind);
+        }
+        queue_watch_event(&tx, &overflow, Err(notify::Error::generic("owned watch error")));
+        assert!(rx.try_recv().unwrap().is_err());
+        assert!(!overflow.load(Ordering::Acquire));
+    }
+
     #[test]
     fn inspector_metrics_are_capped_by_count_and_bytes_not_only_age() {
         let mut m = std::collections::VecDeque::new();

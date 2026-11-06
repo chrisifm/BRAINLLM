@@ -260,6 +260,12 @@ Shadow DOM, Declarative Shadow DOM for SSR, `adoptedStyleSheets` shared across i
 **HMR with preserved state:** the dev server sends the new module; the runtime re-mounts the instances of that
 `data-b` keeping `sig` values by name. A CSS-only change swaps the sheet without re-mounting. The HMR client emits on `window` the `brain:hmr` event `{kind:'css'|'js'|'reload', file, receivedAt, appliedAt}` (ms epoch = `performance.timeOrigin + performance.now()`); `appliedAt` is taken after the sheet loads (css), after re-mounting (js) or right before reloading (reload).
 
+Dev watcher admission (2026-11-05): access notifications are discarded in the callback before the bounded
+64-event mutation queue. Linux source reads may otherwise fill that queue while compilation runs and falsely
+trigger lost-mutation recovery. Create/modify/remove/unknown events and watcher errors retain admission;
+real mutation overflow still clears caches and reloads clients. The focus navigation regression also retains
+an identity outside the mounted view, so unexpected full document loads cannot pass as client navigation.
+
 **Accessibility, verified by `brain check`** (B04xx errors with fix):
 - B0401 `<img>` without `alt`.
 - B0402 `on:click` on a non-interactive element: fix with `<button>`.
