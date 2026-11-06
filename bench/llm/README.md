@@ -180,3 +180,22 @@ changing `baseline.json`. Local artifact: `results/codex-gpt-6.1-sol-medium-type
 The earlier owned-canceled partial candidate is not acceptance evidence. This cohort measures source authoring;
 handler execution, shutdown, migration integrity, browser route reachability and public npm consumption require
 their separate regression and release gates. The CLI provider does not supply a verified monetary charge.
+
+
+## 0.10.0 frozen field-completion candidate (2026-11-06)
+
+A fresh `codex/gpt-6.1-sol/medium/spec` run generated the same twenty briefs as the accepted published 0.8.12
+reference. Both scored **20/20 first pass** with zero infrastructure failures. The candidate used concurrency one
+and allowed at most three repair rounds; every brief passed its initial generation, so no repair was used.
+The explicit release gate passed against the accepted reference without changing `baseline.json`.
+
+| Snapshot | Binary SHA prefix | Served spec SHA prefix | First pass |
+|---|---|---|---|
+| Published npm 0.8.12 reference | `92b1599bc6de` | `4df8ceaca9cc` | 20/20 |
+| Frozen 0.10.0 debug candidate | `69fb688f187d` | `f9b9717ceed3` | 20/20 |
+
+The candidate served 77,828 specification bytes with stable spec and scaffold token hashes (`f03e6c811f69`).
+Local artifact: `results/codex-gpt-6.1-sol-medium-backlog-010-final-20261106.json`. The provider supplied no verified
+monetary charge. These results measure specification-only source generation; optional integrations, real HTTP,
+browser behavior, database concurrency, bounded shutdown and anonymous package installation have separate gates.
+The following test-only fixture and gate-registration corrections did not change the frozen compiler or specification.
