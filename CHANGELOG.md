@@ -25,6 +25,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Reproduce held-connection pool shutdown and undersized PM2 timeouts before the fixes; verify migration previews do not execute pending SQL and real native shutdown exits without forced termination.
 - Match production diagnostic privacy assertions to their own call site when database tests log concurrently.
 - Source CI omits test debug symbols before offline native packaging and reports subprocess timeout causes, preserving production-install assertions and deadlines.
+- Queue liveness acceptance requires a healthy completed doctor report instead of searching partial output; its bounded probe uses the registry smoke's existing doctor budget and reports process metadata.
+- Backend CI selects an owned browser wrapper for doctor acceptance, matching the full source verification setup without changing consumer browser settings.
 
 ## [0.9.0] - 2026-11-05
 

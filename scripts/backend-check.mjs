@@ -7,6 +7,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import net from 'node:net'
 import { createHmac, randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
+import { hasDoctorAdvice } from './gates/doctor-observation.mjs'
 const project = fileURLToPath(new URL('../', import.meta.url))
 const targets=['session_controls','analytics','api_keys','backend','caching','cluster','data_queries','domain_writes','edge','exact_types','files','imports','foundation','jwt_sessions','links','media','native_openapi','production_shape','query_shape','routes','auth_flows','auth_http','native_sockets','organizations','queues','row_policy','security_matrix','system_keys']
 // Release gates that drive the real binary over real sockets (scripts/gates/<name>.mjs); selectable like a test target.
@@ -239,7 +240,13 @@ try {
     if(queued.id!==duplicate.id) throw Error('CLI idempotency key created a duplicate job')
     // Queue liveness: the waiting job is visible with no queue named, and doctor says nothing is running it, until a worker is.
     const queueRow=()=>brain(['jobs','stats'],app).queues.find(row=>row.queue==='deliver')
-    const doctorSays=code=>spawnSync(binary,['doctor','--json'],{cwd:app,env:cliEnv,encoding:'utf8',timeout:20000,maxBuffer:1024*1024}).stdout.includes(`"${code}"`)
+    const doctorSays=code=>{
+      const started=Date.now()
+      // Doctor includes browser tests and a production build; use the existing registry-smoke doctor budget.
+      const result=spawnSync(binary,['doctor','--json'],{cwd:app,env:cliEnv,encoding:'utf8',timeout:240000,maxBuffer:8*1024*1024})
+      console.log(JSON.stringify({event:'backend-doctor-probe',elapsedMs:Date.now()-started,status:result.status,errorCode:result.error?.code??null,signal:result.signal??null,stdoutBytes:Buffer.byteLength(result.stdout||'')}))
+      return hasDoctorAdvice(result,code)
+    }
     const waiting=queueRow()
     if(waiting?.pending!==1||waiting.workers!==0||waiting.declared!==true||typeof waiting.oldestWaitSeconds!=='number') throw Error('`brain jobs stats` did not report the waiting queue: '+JSON.stringify(waiting))
     if(!doctorSays('B0765')) throw Error('`brain doctor` did not warn B0765 for a queue with no worker')
