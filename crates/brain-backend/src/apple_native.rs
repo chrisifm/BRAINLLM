@@ -486,6 +486,7 @@ mod tests {
             uuid::Uuid::new_v4().simple()
         )));
         let config = |jwt: bool| crate::http::Config {
+            vitals: None,
             resources: vec![],
             jobs: vec![],
             uploads: files.0.clone(),
