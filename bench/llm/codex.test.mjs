@@ -163,9 +163,10 @@ test('frozen run artifacts compose with the existing gate and preserve unknown c
   t.after(async()=>{await rm(join(here,'results',tag),{recursive:true,force:true});await rm(join(here,'results',`${tag}.json`),{force:true})})
   const f = await fixture(t, `require('node:fs').writeFileSync(${last},'<p>Generated</p>\\n');${complete}`)
   const brain=join(f.dir,'brain')
+  const referenceSpec='## Reference component\nSynthetic reference \u00e9\u{1f680}\n## SEO\nSynthetic SEO'
   await writeFile(brain, `
 const fs=require('node:fs'),path=require('node:path');const a=process.argv.slice(2);
-if(a[0]==='spec') console.log('## Reference component\\nSynthetic reference\\n## SEO\\nSynthetic SEO');
+if(a[0]==='spec') console.log(${JSON.stringify(referenceSpec)});
 else if(a[0]==='new'){if(!/^[a-z][a-z0-9-]*$/.test(path.basename(a[1])))process.exit(2);fs.mkdirSync(a[1],{recursive:true});fs.writeFileSync(path.join(a[1],'tokens.cssbrain'),'--space-1: 4px;');}
 else if(a[0]==='check') console.log('[]');else process.exit(2);
 `,{mode:0o600})
@@ -184,6 +185,8 @@ syncBuiltinESMExports();`)
   const {summary,rows}=JSON.parse(await readFile(artifact,'utf8'))
   assert.equal(summary.provider,'codex');assert.equal(summary.effort,'medium');assert.equal(summary.costUSD,null)
   assert.equal(summary.stable,true);assert.equal(summary.n,20);assert.equal(summary.firstPass,'20/20');assert.equal(summary.infraFail,0)
+  assert.equal(summary.specBytes,Buffer.byteLength(referenceSpec+'\n','utf8'))
+  assert.ok(summary.specBytes>(referenceSpec+'\n').length,'specification bytes include multibyte UTF-8 characters')
   assert.equal(rows[0].tries[0].cost,null);assert.equal(rows[0].tries[0].cachedInput,20)
   const gateDir=join(f.dir,'gate')
   await mkdir(gateDir)
