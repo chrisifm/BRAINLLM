@@ -11,7 +11,7 @@ import { hasDoctorAdvice } from './gates/doctor-observation.mjs'
 const project = fileURLToPath(new URL('../', import.meta.url))
 const targets=['vitals','session_controls','analytics','api_keys','backend','caching','cluster','data_queries','domain_writes','edge','exact_types','files','imports','foundation','jwt_sessions','links','media','native_openapi','production_shape','query_shape','routes','auth_flows','auth_http','native_sockets','organizations','queues','row_policy','security_matrix','system_keys']
 // Release gates that drive the real binary over real sockets (scripts/gates/<name>.mjs); selectable like a test target.
-const gates=['native-vitals','http-truth-table','failure-logs','captcha-joint','session-boundary','job-diagnostics','custom-route-verifier','database-audit','edge-audit','named-aggregates','redis-cache','computed-backfill']
+const gates=['route-constraints','native-vitals','http-truth-table','failure-logs','captcha-joint','session-boundary','job-diagnostics','custom-route-verifier','database-audit','edge-audit','named-aggregates','redis-cache','computed-backfill']
 // A module missing from `targets` could not be selected and would silently run in every focused pass of another target.
 const declared=[...readFileSync(join(project,'crates/brain-backend/tests/integration.rs'),'utf8').matchAll(/^mod (\w+);/gm)].map(match=>match[1])
 const unlisted=[...declared.filter(name=>!targets.includes(name)),...targets.filter(name=>!declared.includes(name))]
@@ -230,7 +230,7 @@ try {
       if(repeated.applied!==false||repeated.installed!==30||repeated.installedAfter!==30||repeated.pendingAfter.length!==0)throw Error('Repeated framework apply must report no advancement')
       previous()
       writeFileSync(join(app,'server/resources/sample/schema.jsbrain'),"<meta server>\nexport default { title: 'str!', note: 'str' }\n")
-      const refused=spawnSync(binary,['backend','migrate','--json'],{cwd:app,env:cliEnv,encoding:'utf8',timeout:30000,maxBuffer:65536})
+      const refused=spawnSync(binary,['backend','migrate','--json'],{cwd:app,env:migrationEnv,encoding:'utf8',timeout:30000,maxBuffer:65536})
       if(refused.status===0||!((refused.stdout||'')+(refused.stderr||'')).includes('even optional additions require explicit approval'))throw Error('Optional contract additions must explain their explicit approval boundary')
       check(cli(['backend','approve-contract','--only','sample','--json'],app),false,26)
       check(cli(['backend','approve-contract','--only','sample','--apply','--json'],app),true,30)
