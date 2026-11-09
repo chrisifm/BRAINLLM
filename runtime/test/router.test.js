@@ -187,9 +187,9 @@ test('guards (Navigation API): precommit cancels or redirects before commit; wit
   globalThis.navigation = { currentEntry: { url: 'http://x.test/a' }, addEventListener: (t, f) => (h = f), removeEventListener() {}, navigate: (u, o) => navs.push([u, o.history]) }
   const { m } = page()
   const r = router({ parse, hard: u => assert.fail('hard ' + u), guards: { '/c': () => false, '/admin': () => redirect('/login') } })
-  const fire = url => {
+  const fire = (url, cancelable = true) => {
     let o
-    h({ canIntercept: true, destination: { url }, intercept: x => (o = x) })
+    h({ canIntercept: true, cancelable, destination: { url }, intercept: x => (o = x) })
     return o
   }
   // precommit supported
@@ -206,6 +206,9 @@ test('guards (Navigation API): precommit cancels or redirects before commit; wit
   o = fire('http://x.test/c')
   await o.handler()
   assert.deepEqual(navs, [['http://x.test/login', 'replace']])
+  // back/forward traverse is not cancelable: intercept() throws with a precommitHandler, so none is passed
+  o = fire('http://x.test/c', false)
+  assert.equal(o.precommitHandler, undefined)
   r.stop()
   delete globalThis.navigation
 })
