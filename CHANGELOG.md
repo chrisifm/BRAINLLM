@@ -9,6 +9,12 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-11-09
+
+### Fixed
+
+- A plain `<meta name|property|http-equiv>` at a view's root moves into the page `<head>`, so `<meta name="referrer">` sets a per-page Referrer-Policy instead of staying in the body markup.
+
 ## [0.10.3] - 2026-11-06
 
 ### Fixed

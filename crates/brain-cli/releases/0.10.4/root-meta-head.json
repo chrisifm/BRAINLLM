@@ -1,0 +1,14 @@
+{
+  "id": "root-meta-head",
+  "kind": "fix",
+  "title": "Root-level meta tags of a view reach the page head",
+  "why": "A `<meta name>` written at a view's root now lands in `<head>`, so a page can set its own Referrer-Policy with `<meta name=\"referrer\">`.",
+  "changelog": [
+    "A plain `<meta name|property|http-equiv>` at a view's root moves into the page `<head>`"
+  ],
+  "guide": "SPEC.md",
+  "apis": [],
+  "affects": [
+    "views/**"
+  ]
+}
