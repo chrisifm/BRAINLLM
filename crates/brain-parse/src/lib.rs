@@ -45,6 +45,12 @@ pub fn parse(src: &str, path: &Path) -> Result<Component, Vec<Diag>> {
                 head.extend(e.children.iter().cloned());
                 false
             }
+            // A plain `<meta name|property|http-equiv>` at the view's root is a head tag too (e.g.
+            // `<meta name="referrer" content="no-referrer">`); it used to stay in the body markup and never reach `<head>`.
+            ast::Node::Element(e) if e.tag.eq_ignore_ascii_case("meta") && e.attrs.iter().any(|a| matches!(a.name.as_str(), "name" | "property" | "http-equiv")) => {
+                head.push(n.clone());
+                false
+            }
             _ => true,
         });
     }

@@ -164,7 +164,10 @@ A parameter named `page` in that list is checked: `?page=1` answers 301 to the b
 Values may be expressions from `load` props: `<meta seo title={props.user.name} description={props.user.bio}
 jsonld={{ '@type': 'Person', name: props.user.name }}>`. Site defaults live in `app.brain`:
 `<meta seo titleTemplate="%s · Nimbus" og:image="/og.png" twitter="@nimbus">`. Any other tag goes in a `<head>` block of
-the view (merged, deduplicated by name/property). `[id]` views list their pages with
+the view (merged, deduplicated by name/property); a plain `<meta name|property|http-equiv>` at the view's root is moved
+there too. Per-page Referrer-Policy: `<meta name="referrer" content="no-referrer">` (overrides the default header). When a
+response header looks wrong (Referrer-Policy, CSP, cache), always check the reverse proxy too (nginx `add_header` /
+`proxy_hide_header`): it can add or replace the headers the build emits. `[id]` views list their pages with
 `export async function paths() { return [{ id: '1' }] }` so they are prerendered and appear in the sitemap. A listed page that throws or renders nothing stops `brain build`.
 Live `[slug]` views (SSR, no `paths()`) export `sitemap({ env })` instead, returning `[{ slug, lastmod? }]` (key = the
 bracket name; `lastmod` a `YYYY-MM-DD` string or Date; an item without the key is skipped). `brain guide seo`; never both, B0117.
