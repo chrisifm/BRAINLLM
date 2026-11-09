@@ -1,0 +1,14 @@
+{
+  "id": "traverse-intercept",
+  "kind": "fix",
+  "title": "Back and forward navigation render the destination view",
+  "why": "On back/forward the router passed a precommitHandler to a non-cancelable navigate event, intercept() threw and the previous view stayed on screen; the guard now runs after the commit on traversals.",
+  "changelog": [
+    "Browser back/forward renders the destination view again"
+  ],
+  "guide": "SPEC.md",
+  "apis": [],
+  "affects": [
+    "views/**"
+  ]
+}

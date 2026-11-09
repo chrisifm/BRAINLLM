@@ -320,21 +320,25 @@ export function router(o = {}) {
       const shown = u => load(u).then(ok => ok && landed(u)) // the browser restores scroll; focus is ours (it would reset to body)
       if (!gs.length) return e.intercept({ focusReset: 'manual', handler: () => shown(to) })
       let g
-      e.intercept({
+      const opts = {
         focusReset: 'manual',
-        // Chrome 141+: decided before the URL commits (cancel = the address bar never changes; native redirect).
-        async precommitHandler(c) {
-          g = await check(to)
-          if (typeof g === 'string' && c.redirect) c.redirect(new URL(app(g), location.href).href), (g = true)
-          else if (g === false) throw new DOMException('guard', 'AbortError')
-        },
         async handler() {
           if (g === undefined) g = await check(to) // no precommit support: the URL already committed
           if (g === true) return shown(nav.currentEntry ? nav.currentEntry.url : to)
           if (g === null) return hard(to)
           nav.navigate(g === false ? from : new URL(app(g), location.href).href, { history: 'replace' })
         },
-      })
+      }
+      // Chrome 141+: decided before the URL commits (cancel = the address bar never changes; native redirect).
+      // Only on cancelable events: a back/forward traverse is not cancelable and intercept() throws with a
+      // precommitHandler there, leaving the old view on screen; the handler then decides after the commit.
+      if (e.cancelable)
+        opts.precommitHandler = async c => {
+          g = await check(to)
+          if (typeof g === 'string' && c.redirect) c.redirect(new URL(app(g), location.href).href), (g = true)
+          else if (g === false) throw new DOMException('guard', 'AbortError')
+        }
+      e.intercept(opts)
     }
     nav.addEventListener('navigate', h)
     ahead.scan()

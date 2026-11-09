@@ -9,6 +9,12 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.10.5] - 2026-11-09
+
+### Fixed
+
+- Browser back/forward renders the destination view again: the router no longer passes a `precommitHandler` to `intercept()` on non-cancelable traverse navigations, which threw `InvalidStateError` and left the previous view on screen.
+
 ## [0.10.4] - 2026-11-09
 
 ### Fixed
