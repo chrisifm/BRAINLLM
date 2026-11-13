@@ -189,7 +189,6 @@ class Node {
   focus() {}
   blur() {}
   select() {}
-  animate() { return { finished: Promise.resolve(), cancel() {}, finish() {}, play() {}, pause() {} } }
   contains(n) {
     for (; n; n = n.parentNode) if (n === this) return true
     return false

@@ -260,7 +260,7 @@ export function router(o = {}) {
           })
         for (const e of tags(document.head)) e.remove()
         for (const e of tags(doc.head || doc, next)) document.head.appendChild(adopt(e))
-        routed(dest)
+        routed()
         current()
         document.getElementById('brain-next')?.remove()
         const plan = doc.querySelector('#brain-next')

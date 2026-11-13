@@ -9,7 +9,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
-## [0.10.8] - 2026-11-13
+## [0.10.9] - 2026-11-13
 
 ### Added
 
@@ -32,7 +32,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   `load()` instead of failing with a 500 after 5 s.
 - The router no longer overrides an `aria-current` the author wrote or bound, and a link with its own query is current
   only on that query.
-- The prerender DOM accepts `scrollIntoView`, `scrollTo`, `focus`, `blur`, `select` and `animate`, so an effect that
+- The prerender DOM accepts `scrollIntoView`, `scrollTo`, `focus`, `blur` and `select`, so an effect that
   calls them no longer fails `brain build --static`.
 
 ### Changed
