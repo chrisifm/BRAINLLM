@@ -156,7 +156,7 @@ export function route() {
     G.__brainRouted = on => {
       // A string is the destination URL: the router passes it before the new view mounts, since the Navigation API may
       // not have committed location yet and the view would read the previous page's query.
-      if (on !== undefined && typeof on !== 'string') return void (S[3].v = !!on)
+      if (on < 2) return void (S[3].v = !!on) // 0|1|boolean: the navigating flag; a string is a URL
       const v = read(on)
       v.forEach((x, i) => JSON.stringify(untrack(() => S[i].v)) !== JSON.stringify(x) && (S[i].v = x)) // only what changed
     }

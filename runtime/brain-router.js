@@ -64,9 +64,8 @@ const current = () => {
     // An aria-current the author wrote or bound is theirs: the router only manages the ones it set itself.
     if (a.hasAttribute('aria-current') && !marked.has(a)) continue
     // A link with its own query is current only on that exact query (`/?tab=b` is not the page `/?tab=a`).
-    const same = u.origin === location.origin && u.pathname.replace(/\/$/, '') === location.pathname.replace(/\/$/, '') && (!u.search || u.search === location.search)
-    if (same) a.setAttribute('aria-current', 'page'), marked.add(a)
-    else if (marked.has(a)) a.removeAttribute('aria-current'), marked.delete(a)
+    if (u.origin === location.origin && u.pathname.replace(/\/$/, '') === location.pathname.replace(/\/$/, '') && (!u.search || u.search === location.search)) a.setAttribute('aria-current', 'page'), marked.add(a)
+    else if (marked.delete(a)) a.removeAttribute('aria-current')
   }
 }
 
@@ -222,7 +221,7 @@ export function router(o = {}) {
       const cur = document.querySelector(region), next = doc.querySelector(region)
       if (!cur || !next) return hard(url)
       // DOM, head and active links change in one callback (one frame); a newer navigation that started meanwhile skips it
-      const dest = r.redirected && r.url ? r.url : new URL(url, location.href).href
+      const dest = r.redirected && r.url || url
       const swap = () => {
         if (my !== seq) return
         routed(dest) // route() already shows the destination when the new view mounts

@@ -116,9 +116,9 @@ function flushUrl() {
   if (!writes || !G.location) return
   const next = new URL(G.location.href)
   let replace = true
-  for (const [key, b, value, quiet] of writes) {
-    if (next.pathname !== b.path) continue
-    if (value === encode(b.base)) next.searchParams.delete(key)
+  for (const [key, path, value, quiet] of writes) {
+    if (next.pathname !== path) continue
+    if (value == null) next.searchParams.delete(key)
     else next.searchParams.set(key, value)
     replace &&= quiet
   }
@@ -164,7 +164,7 @@ export function urlBind(cell, key, options = {}) {
     // Several keys written in one handler land in one history entry: writing each at once let the first write's
     // route notification restore the others from the old URL before their own effect ran.
     if (!pending) { pending = []; queueMicrotask(flushUrl) }
-    pending.push([key, b, value, options.history === 'replace'])
+    pending.push([key, b.path, value === encode(base) ? null : value, options.history === 'replace'])
   })
   fx(() => () => {
     if (bindings.get(key) === b) bindings.delete(key)
