@@ -274,12 +274,15 @@ addEventListener('click', e => {
 });
 addEventListener('popstate', () => (leave() ? go(location.href, false) : history.pushState(history.state, '', here)));
 // active links (§41.5, as brain-router.js): every internal <a href> to the current page gets aria-current="page"
+const marked = new WeakSet();
 function current() {
   for (const a of document.querySelectorAll('a[href]')) {
     let u;
     try { u = new URL(a.getAttribute('href'), location.href); } catch { continue; }
-    if (u.origin === location.origin && u.pathname.replace(/\/$/, '') === location.pathname.replace(/\/$/, '')) a.setAttribute('aria-current', 'page');
-    else if (a.getAttribute('aria-current') === 'page') a.removeAttribute('aria-current');
+    if (a.hasAttribute('aria-current') && !marked.has(a)) continue; // the author's own aria-current wins
+    const same = u.origin === location.origin && u.pathname.replace(/\/$/, '') === location.pathname.replace(/\/$/, '') && (!u.search || u.search === location.search);
+    if (same) { a.setAttribute('aria-current', 'page'); marked.add(a); }
+    else if (marked.has(a)) { a.removeAttribute('aria-current'); marked.delete(a); }
   }
 }
 history.scrollRestoration = 'manual';

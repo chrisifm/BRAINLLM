@@ -287,13 +287,26 @@ const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 
 const LOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// brain.json `server.timeoutMs` above the 30 s default also bounds `load()` in dev, as in production (up to 10 min);
+/// before, dev cut every load at 30 s whatever the app declared.
+fn load_timeout(root: &Path) -> std::time::Duration {
+    let declared = std::fs::read_to_string(root.join("brain.json")).ok()
+        .and_then(|src| serde_json::from_str::<serde_json::Value>(&src).ok())
+        .and_then(|json| json.get("server").and_then(|s| s.get("timeoutMs")).and_then(|v| v.as_f64()))
+        .filter(|ms| ms.is_finite() && *ms >= 1.0);
+    match declared {
+        Some(ms) if ms > 30_000.0 => std::time::Duration::from_millis(ms.min(600_000.0) as u64),
+        _ => LOAD_TIMEOUT,
+    }
+}
+
 impl Sidecar {
     /// `vars`: the resolved environment (`.brain_env` development section over the process), seen as `ctx.env`.
     pub fn spawn(root: &Path, vars: &[(String, String)]) -> io::Result<Sidecar> {
         Self::spawn_with(
             root,
             vars,
-            LOAD_TIMEOUT,
+            load_timeout(root),
             MAX_RESPONSE as usize,
             false,
             false,

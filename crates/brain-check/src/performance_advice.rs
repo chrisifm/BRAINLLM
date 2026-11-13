@@ -866,7 +866,9 @@ pub fn check(c: &Component, ctx: &Ctx) -> Vec<Diag> {
                     if !reads(arg).is_disjoint(&changed) {
                         continue;
                     }
-                    if matches!(arg.unparen(), Expr::Call { .. }) {
+                    // A wave (`await Promise.allSettled(batch)` per iteration) is already bounded concurrency.
+                    let wave = matches!(arg.unparen(), Expr::Call { callee, .. } if member(callee).is_some_and(|(obj, name)| ident(obj) == Some("Promise") && matches!(name, "all" | "allSettled" | "any" | "race")));
+                    if matches!(arg.unparen(), Expr::Call { .. }) && !wave {
                         warn(
                             &mut out,
                             c,

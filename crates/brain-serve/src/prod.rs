@@ -356,7 +356,7 @@ impl Static {
             _ => file,
         };
         let mut hs = headers_for(&self.rules, &path);
-        if html && (status>=400 || !hs.iter().any(|(key,_)|key.eq_ignore_ascii_case("Content-Security-Policy")) || brain_pack::cache::SECURITY_DOC.iter().filter(|(required,_)|!required.eq_ignore_ascii_case("X-Generated-By")).any(|(required,_)|!hs.iter().any(|(key,_)|key.eq_ignore_ascii_case(required)))) {
+        if html && (status>=400 || !hs.iter().any(|(key,_)|key.eq_ignore_ascii_case("Content-Security-Policy")) || brain_pack::cache::SECURITY_DOC.iter().filter(|(required,_)|!required.eq_ignore_ascii_case("X-Generated-By") && !required.eq_ignore_ascii_case("X-Frame-Options")).any(|(required,_)|!hs.iter().any(|(key,_)|key.eq_ignore_ascii_case(required)))) {
             let document=self.document_headers(&file);
             if status>=400 {hs=document;}
             else {

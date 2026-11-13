@@ -88,6 +88,7 @@ pub fn check(app: &Path) -> Vec<Diag> {
     problems.extend(brain_pack::read_media_src(app).1);
     problems.extend(brain_pack::read_worker_src(app).1);
     problems.extend(brain_pack::read_form_action(app).1);
+    problems.extend(brain_pack::read_frame_ancestors(app).1);
     let at = span_of(&source, "\"csp\"");
     for problem in problems {
         let (msg, fix) = problem.split_once("; fix: ").unwrap_or((problem.as_str(), "list exact origins"));

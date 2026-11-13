@@ -109,6 +109,26 @@ export function urlDialog(element, key, options) {
 }
 
 // Internal compiler binding for public select/tab/modal signals, once during component setup.
+let pending = null
+function flushUrl() {
+  const writes = pending
+  pending = null
+  if (!writes || !G.location) return
+  const next = new URL(G.location.href)
+  let replace = true
+  for (const [key, b, value, quiet] of writes) {
+    if (next.pathname !== b.path) continue
+    if (value === encode(b.base)) next.searchParams.delete(key)
+    else next.searchParams.set(key, value)
+    replace &&= quiet
+  }
+  if (next.search.length > 8192) { report('URL state exceeds 8 KiB; shorten public selections'); return }
+  if (next.href === G.location.href) return
+  try {
+    G.history[replace ? 'replaceState' : 'pushState'](G.history.state, '', next.href)
+    G.__brainRouted?.()
+  } catch { report('URL state history write failed; reduce the frequency of changes or use history: replace') }
+}
 export function urlBind(cell, key, options = {}) {
   if (G.__brainRoute || G.__brainSSR) {
     if (typeof key === 'string' && key.length <= 200 && !privateKey.test(key) && encode(untrack(() => cell.v)) != null) {
@@ -141,16 +161,10 @@ export function urlBind(cell, key, options = {}) {
     if (value === b.last) return
     b.last = value
     if (value == null) { report('URL state value is private, unsupported or too large; keep it out of navigation state'); return }
-    const next = new URL(G.location.href)
-    if (next.pathname !== b.path) return
-    if (value === encode(base)) next.searchParams.delete(key)
-    else next.searchParams.set(key, value)
-    if (next.search.length > 8192) { report('URL state exceeds 8 KiB; shorten public selections'); return }
-    if (next.href === G.location.href) return
-    try {
-      G.history[options.history === 'replace' ? 'replaceState' : 'pushState'](G.history.state, '', next.href)
-      G.__brainRouted?.()
-    } catch { report('URL state history write failed; reduce the frequency of changes or use history: replace') }
+    // Several keys written in one handler land in one history entry: writing each at once let the first write's
+    // route notification restore the others from the old URL before their own effect ran.
+    if (!pending) { pending = []; queueMicrotask(flushUrl) }
+    pending.push([key, b, value, options.history === 'replace'])
   })
   fx(() => () => {
     if (bindings.get(key) === b) bindings.delete(key)

@@ -140,6 +140,18 @@ pub const SECURITY_DOC: &[(&str, &str)] = &[
     ("X-Generated-By", "BRAINLLM (https://chrisifm.github.io/BRAINLLM/; https://github.com/chrisifm/BRAINLLM)"),
 ];
 
+/// The document-only headers for a page served with `csp`: `X-Frame-Options: DENY` only while the policy forbids every
+/// embedder; with `csp.frameAncestors` the CSP alone decides (XFO cannot list origins), `SAMEORIGIN` for `'self'` only.
+pub fn security_doc(csp: &str) -> Vec<(&'static str, &'static str)> {
+    let ancestors = csp.split(';').map(str::trim).find_map(|d| d.strip_prefix("frame-ancestors ")).unwrap_or("'none'").trim();
+    SECURITY_DOC.iter().filter_map(|&(k, v)| match k {
+        "X-Frame-Options" if ancestors == "'none'" => Some((k, v)),
+        "X-Frame-Options" if ancestors == "'self'" => Some((k, "SAMEORIGIN")),
+        "X-Frame-Options" => None,
+        _ => Some((k, v)),
+    }).collect()
+}
+
 pub struct Applied {
     pub warnings: Vec<String>,
     /// Content hash of the whole build (the worker's cache name and the pages' strong ETag).
@@ -206,11 +218,11 @@ fn google_static_headers(headers:String,paths:&BTreeMap<String,String>,build:&st
         if line.starts_with('/') {current=line.to_string();present.insert(current.clone());}
         if paths.contains_key(&current) && line=="  Cross-Origin-Opener-Policy: same-origin" {out.push_str("  Cross-Origin-Opener-Policy: same-origin-allow-popups\n");}else{out.push_str(line);out.push('\n');}
     }
-    for path in paths.keys().filter(|path|!present.contains(*path)) {out.push_str(&format!("{path}\n"));if http {out.push_str(&format!("  Cache-Control: {REVALIDATE}\n  X-Brain-Build: {build}\n  Vary: Accept-Encoding\n"));}for (key,value) in SECURITY_DOC {let value=if *key=="Cross-Origin-Opener-Policy" {"same-origin-allow-popups"}else{value};out.push_str(&format!("  {key}: {value}\n"));}out.push_str(&format!("  Content-Security-Policy: {csp}\n"));}
+    for path in paths.keys().filter(|path|!present.contains(*path)) {out.push_str(&format!("{path}\n"));if http {out.push_str(&format!("  Cache-Control: {REVALIDATE}\n  X-Brain-Build: {build}\n  Vary: Accept-Encoding\n"));}for (key,value) in security_doc(&csp) {let value=if key=="Cross-Origin-Opener-Policy" {"same-origin-allow-popups"}else{value};out.push_str(&format!("  {key}: {value}\n"));}out.push_str(&format!("  Content-Security-Policy: {csp}\n"));}
     out
 }
 fn google_nginx(paths:&BTreeMap<String,String>,pre:&str,build:&str,http:bool,csp:&str)->String {
-    let mut out=String::new();for (path,file) in paths {out.push_str(&format!("location = {pre}{path} {{\n"));for (key,value) in SECURITY.iter().chain(SECURITY_DOC) {let value=if *key=="Cross-Origin-Opener-Policy" {"same-origin-allow-popups"}else{value};out.push_str(&format!("    add_header {key} \"{value}\" always;\n"));}out.push_str(&format!("    add_header Content-Security-Policy \"{csp}\" always;\n"));if http {out.push_str(&format!("    etag on;\n    add_header Cache-Control \"{REVALIDATE}\";\n    add_header X-Brain-Build {build};\n"));}out.push_str(&format!("    try_files $uri $uri/index.html {pre}{file} =404;\n}}\n"));}out
+    let mut out=String::new();for (path,file) in paths {out.push_str(&format!("location = {pre}{path} {{\n"));for (key,value) in SECURITY.iter().copied().chain(security_doc(&csp)) {let value=if key=="Cross-Origin-Opener-Policy" {"same-origin-allow-popups"}else{value};out.push_str(&format!("    add_header {key} \"{value}\" always;\n"));}out.push_str(&format!("    add_header Content-Security-Policy \"{csp}\" always;\n"));if http {out.push_str(&format!("    etag on;\n    add_header Cache-Control \"{REVALIDATE}\";\n    add_header X-Brain-Build {build};\n"));}out.push_str(&format!("    try_files $uri $uri/index.html {pre}{file} =404;\n}}\n"));}out
 }
 
 /// Applies §35 to the built files. `files` holds text files, `binary` raw ones (copied `public/` assets).
@@ -630,7 +642,7 @@ pub fn headers_with_links(pages: &[PageRef], unhashed_public: &[String], offline
             if http {
                 o.push_str(&format!("  X-Brain-Build: {build}\n"));
             }
-            for (k, v) in SECURITY_DOC {
+            for (k, v) in security_doc(&csp) {
                 o.push_str(&format!("  {k}: {v}\n"));
             }
             o.push_str(&format!("  Content-Security-Policy: {csp}\n"));
@@ -709,7 +721,7 @@ pub fn nginx_brain(n: &str) -> String {
 pub fn caddy(build_hash: &str, http: bool, csp: &str, pre: &str, ext: crate::Ext) -> String {
     let mut o = format!("# BRAINLLM build {build_hash}: paste inside your site block, with `root * <path to dist>`.\n");
     let mut sec: Vec<(String, String)> = SECURITY.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
-    sec.extend(SECURITY_DOC.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+    sec.extend(security_doc(csp).into_iter().map(|(k, v)| (k.to_string(), v.to_string())));
     sec.push(("Content-Security-Policy".into(), csp.to_string()));
     o.push_str("header {\n");
     for (k, v) in &sec {
@@ -796,7 +808,7 @@ fn nginx_private(build_hash: &str, http: bool, csp: &str, pre: &str) -> String {
     }
     // documents also get the document-only set and the CSP
     let mut doc = sec.clone();
-    for (k, v) in SECURITY_DOC {
+    for (k, v) in security_doc(csp) {
         doc.push_str(&format!("    add_header {k} \"{v}\" always;\n"));
     }
     doc.push_str(&format!("    add_header Content-Security-Policy \"{csp}\" always;\n"));
@@ -862,6 +874,9 @@ pub fn app_csp(root: &Path, inline_hashes: &[String], extra: &[(String, String)]
     let forms = crate::read_form_action(root).0.into_iter().map(|source| ("form-action".to_string(), source));
     let extra: Vec<(String, String)> = extra.iter().cloned().chain(frames).chain(scripts).chain(forms).collect();
     let mut policy = csp_with(inline_hashes, &extra, declared.as_deref());
+    if let Some(ancestors) = crate::read_frame_ancestors(root).0 {
+        policy = policy.replacen("frame-ancestors 'none'", &format!("frame-ancestors {}", ancestors.join(" ")), 1);
+    }
     for (directive, sources) in [("media-src", crate::read_media_src(root).0), ("worker-src", crate::read_worker_src(root).0)] {
         if let Some(sources) = sources {
             policy.push_str(&format!("; {directive} 'self'"));

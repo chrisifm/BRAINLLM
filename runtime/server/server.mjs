@@ -100,14 +100,15 @@ function intendedStatus(error) {
   return Number.isInteger(status) && STATUS_CODES[status] && (error instanceof HttpError && status >= 400 && status <= 599 || plain && status >= 400 && status < 500) ? status : null
 }
 // A deliberate public failure → { status, message } for f.error: a plain `{ message }` without a status (400) or an
-// author's Error subclass with a 4xx `status`. Plain `{ status, message }` keeps its message private (driver detail);
+// author's Error subclass with a 4xx `status`, or `throw { status: 404, message, public: true }` (BrainScript has no
+// `class`). Plain `{ status, message }` without `public` keeps its message private (driver detail);
 // built-in errors and bare `Error` messages stay private too.
 const BUILTIN_ERRORS = new Set([Error, TypeError, RangeError, SyntaxError, ReferenceError, EvalError, URIError, AggregateError].map(c => c.prototype))
 function publicError(error) {
   if (!error || typeof error !== 'object' || error instanceof HttpError) return null
   const proto = Object.getPrototypeOf(error), plain = proto === Object.prototype || proto === null
   const typed = error instanceof Error && !BUILTIN_ERRORS.has(proto)
-  const status = plain ? (error.status === undefined ? 400 : 0) : error.status, message = error.message
+  const status = plain ? (error.status === undefined ? 400 : error.public === true ? error.status : 0) : error.status, message = error.message
   if (!(plain || typed) || typeof message !== 'string' || !message || message.length > 500) return null
   return Number.isInteger(status) && status >= 400 && status < 500 && STATUS_CODES[status] ? { status, message } : null
 }
@@ -1089,6 +1090,11 @@ export function createServer(o = {}) {
   try {const path=join(dist,'brain-build.json'),meta=lstatSync(path);if(meta.isFile()&&!meta.isSymbolicLink()&&meta.size<=16384&&JSON.parse(readFileSync(path,'utf8')).compilerBranding===false)compilerBranding=false}catch{}
   const SECURITY={...DEFAULT_SECURITY}
   if(!compilerBranding)delete SECURITY['x-generated-by']
+  // brain.json `csp.frameAncestors` (written into the build policy) decides who may embed the pages: XFO cannot list
+  // origins, so it stays DENY only while the policy forbids every embedder, SAMEORIGIN for 'self' alone.
+  const ancestors = /(?:^|;)\s*frame-ancestors\s+([^;]*)/.exec(mf.csp || '')?.[1]?.trim() || "'none'"
+  if (ancestors === "'self'") SECURITY['x-frame-options'] = 'SAMEORIGIN'
+  else if (ancestors !== "'none'") delete SECURITY['x-frame-options']
   // brain.json `server` (§11.1), written into the manifest by the build; createServer options and env still win
   const SL = mf.server || {}
   const TIMEOUT = +(o.timeout ?? env.BRAIN_TIMEOUT_MS ?? SL.timeoutMs ?? 10000)

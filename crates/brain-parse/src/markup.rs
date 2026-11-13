@@ -143,7 +143,7 @@ impl<'a> Markup<'a> {
     fn braced_expr(&mut self) -> R<Expr> {
         let mut p = self.js_at(self.pos, self.src.len())?;
         if p.current().is_punct("}") {
-            return Err(self.err(p.current().span, "the braces `{}` are empty", "write an expression inside: `{name}`"));
+            return Err(self.err(p.current().span, "the braces `{}` are empty", "write an expression inside: `{name}`; for an optional prop with no default, drop the braces and mark it optional: `state:obj?`"));
         }
         let e = p.expression()?;
         self.close_brace(&p)?;

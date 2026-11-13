@@ -438,6 +438,11 @@ pub(crate) fn respond_with_length<W: Write>(
 ) -> io::Result<()> {
     let mut extra: String = extra.iter().map(|(k, v)| format!("{k}: {v}\r\n")).collect();
     extra.push_str(&trace_headers(status, ctype, &extra));
+    // Dev pages are cross-origin isolated (COEP credentialless): a dedicated worker's script must carry COEP itself, or
+    // the browser refuses to start `*.worker.jsbrain` with no message. Every script answer gets it, plus CORP.
+    if ctype.contains("javascript") && !extra.to_ascii_lowercase().contains("cross-origin-embedder-policy:") {
+        extra.push_str("Cross-Origin-Embedder-Policy: credentialless\r\nCross-Origin-Resource-Policy: same-origin\r\n");
+    }
     let reason = reason(status);
     // no-store unless the caller carries the backend's own lifetime (a public read, a file)
     let cache = if extra.to_ascii_lowercase().contains("cache-control:") { "" } else { "Cache-Control: no-store\r\n" };

@@ -319,7 +319,7 @@ pub fn read_connect_src(root: &Path) -> (Option<Vec<String>>, Vec<String>) {
     let Ok(json) = brain_mcp::Json::parse(&src) else { return (None, vec![]) }; // malformed brain.json is reported elsewhere
     let Some(csp) = json.get("csp") else { return (None, vec![]) };
     let brain_mcp::Json::Obj(entries) = csp else { return (Some(vec![]), vec![format!("brain.json `csp` must be an object; fix: {FIX}")]) };
-    let mut problems: Vec<String> = entries.iter().filter(|(k, _)| !matches!(k.as_str(), "connectSrc" | "frameSrc" | "scriptSrc" | "mediaSrc" | "workerSrc" | "formAction")).map(|(k, _)| format!("brain.json `csp.{k}` is not a CSP setting; fix: {FIX}")).collect();
+    let mut problems: Vec<String> = entries.iter().filter(|(k, _)| !matches!(k.as_str(), "connectSrc" | "frameSrc" | "frameAncestors" | "scriptSrc" | "mediaSrc" | "workerSrc" | "formAction")).map(|(k, _)| format!("brain.json `csp.{k}` is not a CSP setting; fix: {FIX}")).collect();
     let Some(list) = csp.get("connectSrc") else { return (None, problems) };
     let (sources, found) = read_csp_list(list, "connectSrc", FIX, connect_source_problem);
     problems.extend(found);
@@ -350,6 +350,31 @@ fn read_blob_sources(root: &Path, key: &str) -> (Option<Vec<String>>, Vec<String
     let fix = format!("write \"csp\": {{ \"{key}\": [\"blob:\", \"https://media.example.com\"] }}, or [] for the site's own origin only");
     let (sources, problems) = read_csp_list(list, key, &fix, media_source_problem);
     (Some(sources), problems)
+}
+
+/// Who may embed this site's pages: `'self'`, `'none'` or exact origins (http only for localhost or a single-label LAN
+/// host such as `http://intranet`). A wildcard port on localhost (`http://localhost:*`) is allowed; any other wildcard is not.
+pub fn frame_ancestor_problem(source: &str) -> Option<&'static str> {
+    if source == "'self'" || source == "'none'" { return None; }
+    if source.starts_with("wss://") || source.starts_with("ws://") { return Some("an embedding page is a document, so its scheme must be https or http"); }
+    if let Some(rest) = source.strip_prefix("http://") {
+        let host = rest.split(['/', ':']).next().unwrap_or("");
+        let local = matches!(host, "localhost" | "127.0.0.1" | "[::1]") || (!host.is_empty() && !host.contains('.') && host.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
+        if !local { return Some("plain http is only for localhost, 127.0.0.1 or a single-label LAN host"); }
+        if rest.contains('*') && !rest.starts_with("localhost:*") && !rest.starts_with("127.0.0.1:*") { return Some("only a localhost port may be a wildcard"); }
+        return None;
+    }
+    if source.contains('*') { return Some("name an exact origin, without a wildcard"); }
+    connect_source_problem(source)
+}
+
+/// brain.json `csp.frameAncestors`: `None` keeps the default (`frame-ancestors 'none'` + `X-Frame-Options: DENY`).
+pub fn read_frame_ancestors(root: &Path) -> (Option<Vec<String>>, Vec<String>) {
+    let Ok(src) = std::fs::read_to_string(root.join("brain.json")) else { return (None, vec![]) };
+    let Ok(json) = brain_mcp::Json::parse(&src) else { return (None, vec![]) };
+    let Some(list) = json.get("csp").and_then(|csp| csp.get("frameAncestors")) else { return (None, vec![]) };
+    let (sources, problems) = read_csp_list(list, "frameAncestors", "write \"csp\": { \"frameAncestors\": [\"'self'\", \"http://localhost:*\"] }", frame_ancestor_problem);
+    (if sources.is_empty() { None } else { Some(sources) }, problems)
 }
 
 pub fn read_media_src(root: &Path) -> (Option<Vec<String>>, Vec<String>) { read_blob_sources(root, "mediaSrc") }

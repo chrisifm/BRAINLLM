@@ -9,6 +9,40 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.10.7] - 2026-11-13
+
+### Added
+
+- `brain.json` `"csp": { "frameAncestors": ["'self'", "http://localhost:*"] }` lists who may embed the pages in an iframe.
+  Without it pages keep `frame-ancestors 'none'` and `X-Frame-Options: DENY`; with it the CSP decides and XFO is omitted
+  (`SAMEORIGIN` for `'self'` alone), in `brain start`, the Node server, `_headers`, nginx and Caddy output. Invalid entries
+  are B0796.
+- A `.jsbrain` can answer a deliberate 4xx with its message: `throw { status: 404, message: 'Not found', public: true }`.
+
+### Fixed
+
+- `{#each}` and `{#if}` blocks inside `<svg>` create their children in the SVG namespace, so charts are drawn.
+- `<meta seo title={t('…')}>` is translated in `brain run` instead of printing the key.
+- `brain run` sends `Cross-Origin-Embedder-Policy` and `Cross-Origin-Resource-Policy` with every script, so
+  `*.worker.jsbrain` starts on the cross-origin-isolated dev page.
+- `brain run` no longer reloads the page when files under `output/` or plain `.gitignore` entries change.
+- Several `urlState` writes in one handler are applied together in one history entry; before, only the first survived.
+- After a client navigation, `route()` already shows the destination URL and query when the new view mounts.
+- `brain run` honors `server.timeoutMs` above 30 s for `load()` and lets a second request wait up to 35 s for a running
+  `load()` instead of failing with a 500 after 5 s.
+- The router no longer overrides an `aria-current` the author wrote or bound, and a link with its own query is current
+  only on that query.
+- The prerender DOM accepts `scrollIntoView`, `scrollTo`, `focus`, `blur`, `select` and `animate`, so an effect that
+  calls them no longer fails `brain build --static`.
+
+### Changed
+
+- B0910 explains that a plain `.js` import's time is charged to the next `.brain` line and names the ways out:
+  a worker, `<meta budget="ms:N steps:N">` or, on the server, a plain `.mjs`.
+- B0941 is reported only when the app has sign-in (`server/auth.jsbrain`, a session channel or a login view).
+- B1301 no longer flags a loop that awaits a `Promise.all`/`allSettled` wave per iteration.
+- The empty-braces error suggests an optional prop (`state:obj?`) when no default is needed.
+
 ## [0.10.6] - 2026-11-09
 
 ### Fixed

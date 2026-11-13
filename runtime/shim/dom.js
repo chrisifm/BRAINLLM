@@ -181,6 +181,15 @@ class Node {
   getBoundingClientRect() {
     return { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0 }
   }
+  getClientRects() { return [] }
+  // Layout and focus have no meaning while the server renders: an effect that calls them must not fail the build.
+  scrollIntoView() {}
+  scrollTo() {}
+  scrollBy() {}
+  focus() {}
+  blur() {}
+  select() {}
+  animate() { return { finished: Promise.resolve(), cancel() {}, finish() {}, play() {}, pause() {} } }
   contains(n) {
     for (; n; n = n.parentNode) if (n === this) return true
     return false

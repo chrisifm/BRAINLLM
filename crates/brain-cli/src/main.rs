@@ -2760,7 +2760,9 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
         }
     }
     // account emails left in framework English in an app that declares another language
-    if let Some(a) = app.as_ref().filter(|a| a.join("server").is_dir()) {
+    // only an app with sign-in sends them: server/auth.jsbrain, or a session channel / login view from `brain add auth`
+    let has_auth = |a: &std::path::Path| a.join("server/auth.jsbrain").is_file() || a.join("channels/session.jsbrain").is_file() || a.join("views/login.brain").is_file();
+    if let Some(a) = app.as_ref().filter(|a| a.join("server").is_dir() && has_auth(a)) {
         if let Some(i18n) = brain_check::i18n::load(a) {
             let other = i18n.locales.iter().any(|l| l.split('-').next() != Some("en"));
             if other && brain_check::i18n::auth_email_text(&i18n).is_none() {

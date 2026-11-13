@@ -451,6 +451,16 @@
           },
           "description": "Origins pages may embed in an iframe, besides the site's own. A literal iframe outside this list is reported as B0811."
         },
+        "frameAncestors": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^('self'|'none'|https://[a-z0-9.-]+(:[0-9]+)?|http://(localhost|127\\.0\\.0\\.1)(:([0-9]+|\\*))?|http://[a-z0-9-]+(:[0-9]+)?)$"
+          },
+          "description": "Who may embed this site's pages in an iframe (CSP frame-ancestors). Absent: 'none' plus X-Frame-Options DENY. With origins, X-Frame-Options is omitted (SAMEORIGIN when the list is only 'self'). http only for localhost or a single-label LAN host."
+        },
         "formAction": {
           "type": "array",
           "maxItems": 64,

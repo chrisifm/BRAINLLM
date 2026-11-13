@@ -105,8 +105,10 @@ fn sidecar_slot(
     if ctx.stop.load(Ordering::Acquire) {
         return Err("dev server stopped".into());
     }
-    lock_for(&ctx.sidecar, Duration::from_secs(5)).ok_or_else(|| {
-        "sidecar busy: queue wait exceeded 5 s; retry after the current request finishes".into()
+    // load() runs one request at a time in dev: a second tab or a poll waits for a long load (up to its 30 s default)
+    // instead of failing with a 500 after 5 s.
+    lock_for(&ctx.sidecar, Duration::from_secs(35)).ok_or_else(|| {
+        "sidecar busy: queue wait exceeded 35 s; another load() is still running (dev runs one at a time)".into()
     })
 }
 
@@ -1603,7 +1605,7 @@ fn app_page(ctx: &Ctx, req: &http::Request) -> (u16, String, Option<String>) {
                     fixed_view(ctx, "views/404.brain", "{}", "Not found", &req.path),
                 ),
                 Ok(props) => {
-                    view_seo = view_meta(ctx, &r.view, &props);
+                    view_seo = view_meta(ctx, &r.view, &props, &req.path);
                     // route().params on the client (RUNTIME #222): the same meta server.mjs writes on SSR pages with params
                     if !r.params.is_empty() {
                         let kv: Vec<String> = r
@@ -1647,7 +1649,7 @@ fn app_page(ctx: &Ctx, req: &http::Request) -> (u16, String, Option<String>) {
     // an error page from fixed_view has no load(): its own <meta seo>, else the title production gives it
     if view_seo.is_none() && status >= 400 {
         if let Some(view) = fixed_view_of(&slot) {
-            view_seo = view_meta(ctx, &view, "{}").filter(|(seo, _)| seo.iter().any(|(k, _)| k == "title"));
+            view_seo = view_meta(ctx, &view, "{}", &req.path).filter(|(seo, _)| seo.iter().any(|(k, _)| k == "title"));
             if view_seo.is_none() {
                 title = brain_pack::reserved_view(&view).map(|(_, t)| titled(&ctx.root, t));
                 head_extra.push_str("<meta name=\"robots\" content=\"noindex\">");
@@ -2265,7 +2267,22 @@ fn rpc_candidates(dir: &Path, out: &mut Vec<PathBuf>) -> bool {
 
 /// `seo(props)` as pairs and `head(props)` HTML of a view, evaluated in the load sidecar; None if the view has
 /// neither or they fail (the page still renders; the error goes to the log).
-fn view_meta(ctx: &Ctx, view: &str, props: &str) -> Option<(Vec<(String, String)>, String)> {
+fn view_meta(ctx: &Ctx, view: &str, props: &str, path: &str) -> Option<(Vec<(String, String)>, String)> {
+    // `<meta seo title={t('…')}>` reads the page's language and dictionaries, as load() does (§37); without them the
+    // title printed the key itself.
+    let i18n = brain_pack::read_i18n(&ctx.root);
+    let language = match (split_locale(&i18n, path).0, &i18n) {
+        (Some(loc), Some((def, _))) => format!("\"$locale\":{},\"$dict\":{{{}:{},{}:{}}}", json_str(&loc), json_str(def), dict_json(&ctx.root, def), json_str(&loc), dict_json(&ctx.root, &loc)),
+        _ => String::new(),
+    };
+    let merged;
+    let props = match props.trim_end().strip_suffix('}') {
+        Some(head) if !language.is_empty() && props.trim_start().starts_with('{') => {
+            merged = format!("{head}{}{language}}}", if head.trim_end().ends_with('{') { "" } else { "," });
+            merged.as_str()
+        }
+        _ => props,
+    };
     let c = compile_cached(ctx, &ctx.root.join(view)).ok()?;
     let (has_seo, has_head) = (
         c.server_js.contains("export const seo ="),
@@ -2700,9 +2717,29 @@ fn broadcast(clients: &Clients, msg: &str) {
         .retain_mut(|c| c.write_all(&frame).is_ok());
 }
 
+/// Plain entries of the app's `.gitignore` (no globs or negations), read once: what the app writes at runtime
+/// (`output/`, `data/jobs/`) must not reload the browser in the middle of the work that writes it.
+static GITIGNORED: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
+fn gitignore_entries(root: &Path) -> &'static [String] {
+    GITIGNORED.get_or_init(|| {
+        std::fs::read_to_string(root.join(".gitignore")).unwrap_or_default().lines().map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with(['#', '!']) && !l.contains(['*', '?', '[']))
+            .map(|l| l.trim_start_matches('/').trim_end_matches('/').to_string())
+            .filter(|l| !l.is_empty() && l != ".brain_env" && !l.ends_with(".brain") && l != "brain.json").collect()
+    })
+}
+
+fn ignored_in(root: &Path, rel: &Path) -> bool {
+    ignored(rel) || gitignore_entries(root).iter().any(|entry| {
+        if entry.contains('/') { rel.starts_with(entry) } else { rel.components().any(|c| c.as_os_str() == entry.as_str()) }
+    })
+}
+
 fn ignored(rel: &Path) -> bool {
-    // What the framework itself writes at runtime: `brain start` logs here, so reloading on it never stops.
-    if rel.starts_with("logs") || rel.starts_with("docs/app") {
+    // What the framework itself writes at runtime: `brain start` logs here, so reloading on it never stops; `output/`
+    // is in the starter's own .gitignore, where server code writes results.
+    if rel.starts_with("logs") || rel.starts_with("docs/app") || rel.starts_with("output") {
         return true;
     }
     rel.components().any(|c| {
@@ -2727,7 +2764,7 @@ fn queue_watch_event(root: &Path, tx: &std::sync::mpsc::SyncSender<notify::Resul
     // Match on_change's effective identity, not just a lexical alias such as logs -> views. Resolve
     // only already-ignored candidates, at most eight paths; missing/uncertain/large batches stay queued.
     let ignored_path = |path: &Path| path.strip_prefix(root).is_ok_and(|relative| relative != Path::new(".brain_env")
-        && (ignored(relative) || relative.to_string_lossy().ends_with(".test.brain")));
+        && (ignored_in(root, relative) || relative.to_string_lossy().ends_with(".test.brain")));
     if matches!(&event, Ok(event) if !event.need_rescan() && !event.paths.is_empty() && event.paths.len() <= 8
         && event.paths.iter().all(|path| ignored_path(path))
         && event.paths.iter().all(|path| path.canonicalize().is_ok_and(|resolved| ignored_path(&resolved)))) {
@@ -2809,7 +2846,7 @@ fn on_change(ctx: &Ctx, path: &Path) {
         ctx.log("info", "[env] .brain_env changed → reload".into());
         return broadcast_ev(ctx, "{\"type\":\"reload\",\"path\":\"/.brain_env\"}");
     }
-    if ignored(rel) || path.is_dir() {
+    if ignored_in(&ctx.root, rel) || path.is_dir() {
         return;
     }
     let url = format!("/{}", rel.to_string_lossy().replace('\\', "/"));

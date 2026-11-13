@@ -143,8 +143,8 @@ const strip = p => {
   const m = G.document && document.querySelector('meta[name=brain-base]'), b = (m && m.getAttribute('content')) || '/'
   return b !== '/' && (p + '/').startsWith(b) ? '/' + p.slice(b.length) : p
 }
-const read = () => {
-  const u = new URL(location.href)
+const read = (href = location.href) => {
+  const u = new URL(href, location.href)
   return [strip(u.pathname), paramsOf(), Object.fromEntries(u.searchParams)]
 }
 export function route() {
@@ -154,8 +154,10 @@ export function route() {
     const S = [...read(), false].map(v => sig(v))
     cur = { get path() { return S[0].v }, get params() { return S[1].v }, get query() { return S[2].v }, get navigating() { return S[3].v } }
     G.__brainRouted = on => {
-      if (on !== undefined) return void (S[3].v = !!on)
-      const v = read()
+      // A string is the destination URL: the router passes it before the new view mounts, since the Navigation API may
+      // not have committed location yet and the view would read the previous page's query.
+      if (on !== undefined && typeof on !== 'string') return void (S[3].v = !!on)
+      const v = read(on)
       v.forEach((x, i) => JSON.stringify(untrack(() => S[i].v)) !== JSON.stringify(x) && (S[i].v = x)) // only what changed
     }
   }

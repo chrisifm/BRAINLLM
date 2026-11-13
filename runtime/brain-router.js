@@ -47,10 +47,11 @@ G.__brainNavigate = navigate // brain-form follows a server function's { redirec
 
 // route() lives in brain-env.js (it needs the core's signals; a page without islands downloads only this router):
 // after every client navigation the router calls the hook it installs.
-const routed = () => G.__brainRouted?.()
+const routed = to => G.__brainRouted?.(to)
 
 // Active links (§41.5): every internal <a href> to the current page gets aria-current="page" (the CSS hook is
 // [aria-current=page]); the others lose it. On start and after every client navigation.
+const marked = new WeakSet()
 const current = () => {
   if (!G.document || !G.location) return
   for (const a of document.querySelectorAll('a[href]')) {
@@ -60,8 +61,12 @@ const current = () => {
     } catch {
       continue
     }
-    if (u.origin === location.origin && u.pathname.replace(/\/$/, '') === location.pathname.replace(/\/$/, '')) a.setAttribute('aria-current', 'page')
-    else if (a.getAttribute('aria-current') === 'page') a.removeAttribute('aria-current')
+    // An aria-current the author wrote or bound is theirs: the router only manages the ones it set itself.
+    if (a.hasAttribute('aria-current') && !marked.has(a)) continue
+    // A link with its own query is current only on that exact query (`/?tab=b` is not the page `/?tab=a`).
+    const same = u.origin === location.origin && u.pathname.replace(/\/$/, '') === location.pathname.replace(/\/$/, '') && (!u.search || u.search === location.search)
+    if (same) a.setAttribute('aria-current', 'page'), marked.add(a)
+    else if (marked.has(a)) a.removeAttribute('aria-current'), marked.delete(a)
   }
 }
 
@@ -217,8 +222,10 @@ export function router(o = {}) {
       const cur = document.querySelector(region), next = doc.querySelector(region)
       if (!cur || !next) return hard(url)
       // DOM, head and active links change in one callback (one frame); a newer navigation that started meanwhile skips it
+      const dest = r.redirected && r.url ? r.url : new URL(url, location.href).href
       const swap = () => {
         if (my !== seq) return
+        routed(dest) // route() already shows the destination when the new view mounts
         dispose(cur)
         fresh()
         cur.replaceChildren(...[...next.childNodes].map(adopt))
@@ -253,7 +260,7 @@ export function router(o = {}) {
           })
         for (const e of tags(document.head)) e.remove()
         for (const e of tags(doc.head || doc, next)) document.head.appendChild(adopt(e))
-        routed()
+        routed(dest)
         current()
         document.getElementById('brain-next')?.remove()
         const plan = doc.querySelector('#brain-next')
