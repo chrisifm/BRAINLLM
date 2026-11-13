@@ -1,0 +1,31 @@
+{
+  "id": "embed-and-dev-fixes",
+  "kind": "fix",
+  "title": "Embeddable pages, SVG blocks, translated titles and steadier brain run",
+  "why": "Apps embedded by another local panel were blocked by a fixed X-Frame-Options DENY, SVG children of blocks were created as HTML, <meta seo title={t()}> printed the key in dev, workers never started under brain run, and writes under output/ reloaded the page mid-work.",
+  "changelog": [
+    "\"frameAncestors\"",
+    "can answer a deliberate 4xx",
+    "blocks inside `<svg>` create their children",
+    "`<meta seo title={t('…')}>` is translated",
+    "`brain run` sends `Cross-Origin-Embedder-Policy`",
+    "no longer reloads the page when files under `output/`",
+    "Several `urlState` writes in one handler",
+    "`route()` already shows the destination",
+    "honors `server.timeoutMs` above 30 s",
+    "no longer overrides an `aria-current`",
+    "The prerender DOM accepts `scrollIntoView`",
+    "B0910 explains",
+    "B0941 is reported only",
+    "B1301 no longer flags",
+    "The empty-braces error suggests"
+  ],
+  "guide": "SPEC.md",
+  "apis": [],
+  "affects": [
+    "brain.json",
+    "views/**",
+    "comp/**",
+    "server/**"
+  ]
+}

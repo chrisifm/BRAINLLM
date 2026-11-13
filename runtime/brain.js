@@ -246,17 +246,14 @@ const bind = (f, s) => {
   })
 }
 
-// A block fragment that starts with an SVG-only element ({#each}/{#if} inside <svg>) is parsed inside <svg>, so its
-// nodes get the SVG namespace instead of becoming HTMLUnknownElement (foreignObject children go back to XHTML).
-const SVG = /^\s*(?:<!(?:--[^]*?--)?>\s*)*<(?:g|path|circle|ellipse|line|polyline|polygon|rect|text|tspan|textPath|defs|use|stop|linearGradient|radialGradient|clipPath|mask|pattern|marker|symbol|image|foreignObject|filter|fe[a-z]+)[\s/>]/i
-export function tpl(h) {
+export function tpl(h, s) {
   let n
   return () => {
     if (!n) {
-      const t = document.createElement('template'), svg = SVG.test(h)
-      t.innerHTML = svg ? '<svg>' + h + '</svg>' : h
-      let c = t.content
-      if (svg) { const f = document.createDocumentFragment(); for (const x of [...c.firstChild.childNodes]) f.appendChild(x); c = f }
+      const t = document.createElement('template'), c = t.content
+      t.innerHTML = h
+      // s: the compiler wrapped an SVG block fragment in <svg> so it parses in the SVG namespace; unwrap it
+      if (s) c.replaceChildren(...c.firstChild.childNodes)
       n = c.childNodes.length == 1 ? c.firstChild : c
     }
     // A: SSR stamps the clone, hydration adopts the node the server rendered (#285)

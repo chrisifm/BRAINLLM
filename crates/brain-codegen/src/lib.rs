@@ -1425,11 +1425,14 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
     let mut hmr_literals = Vec::new();
     for (i, h) in g.templates.iter().enumerate() {
         let tpl = if g.aliased.contains("tpl") { "$tpl" } else { "tpl" };
+        // A block fragment of SVG-only elements ({#each}/{#if} inside <svg>) is parsed inside <svg> and unwrapped by
+        // tpl(h, 1), so its nodes get the SVG namespace instead of becoming unknown HTML elements.
+        let (h, svg) = if svg_fragment(h) { (format!("<svg>{h}</svg>"), ", 1") } else { (h.clone(), "") };
         if opts.dev {
             js.push_str(&format!("const $t{i} = {}Fragment({tpl}(", g.budget_prefix));
-            let start=js.len();js.push_str(&js_str(h));hmr_literals.push((start,js.len()));
-            js.push_str(&format!("), {}, {i});\n",js_str(&g.hash)));
-        } else {js.push_str(&format!("const $t{i} = {tpl}({});\n", js_str(h)));}
+            let start=js.len();js.push_str(&js_str(&h));hmr_literals.push((start,js.len()));
+            js.push_str(&format!("{svg}), {}, {i});\n",js_str(&g.hash)));
+        } else {js.push_str(&format!("const $t{i} = {tpl}({}{svg});\n", js_str(&h)));}
     }
     if !g.ids.is_empty() || g.dyn_ids {
         js.push_str("let $n = 0, $e;\n");
@@ -1600,4 +1603,14 @@ fn kebab(name: &str) -> String {
         }
     }
     out
+}
+
+/// True when a template starts with an element that exists only inside `<svg>` (a block body inside an `<svg>`).
+fn svg_fragment(h: &str) -> bool {
+    let t = h.trim_start();
+    let Some(rest) = t.strip_prefix('<') else { return false };
+    let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
+    matches!(name.as_str(), "g" | "path" | "circle" | "ellipse" | "line" | "polyline" | "polygon" | "rect" | "text" | "tspan" | "textPath"
+        | "defs" | "use" | "stop" | "linearGradient" | "radialGradient" | "clipPath" | "mask" | "pattern" | "marker" | "symbol"
+        | "foreignObject" | "filter" | "image") || (name.starts_with("fe") && name.len() > 2)
 }
