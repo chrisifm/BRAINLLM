@@ -108,6 +108,7 @@ pub fn compile_hash(
         root: Some(root.to_path_buf()),
         public_env: crate::env::public(),
         lint,
+        fallback: crate::fallback_texts(root),
         ..Default::default()
     };
     // Persistent, content-addressed cache (INTERNALS §28): the key covers the file's blocks, the compiler version

@@ -11,9 +11,6 @@ import { _rt, fx, sig } from './brain.js'
 
 const G = globalThis, I = _rt(), LIMIT = 3, WINDOW = 10000
 const TEXT = 'This section could not load.'
-// Default fallback, Retry and toast texts in the page's language (`<html lang>`); `<meta fallback retry>` still wins.
-const L = { es: ['No se pudo cargar esta sección.', 'Reintentar', 'Algo salió mal. Inténtalo de nuevo.'], pt: ['Não foi possível carregar esta seção.', 'Tentar de novo', 'Algo deu errado. Tente de novo.'], fr: ['Impossible de charger cette section.', 'Réessayer', 'Une erreur est survenue. Réessayez.'] }
-const say = i => L[(G.document?.documentElement?.lang || '').slice(0, 2).toLowerCase()]?.[i]
 
 // ---------- circuit breaker (§30.3) ----------
 // Per instance budgets, checked as its effects run: runs of one effect per second, continuous work per flush (over budget in
@@ -137,7 +134,7 @@ function toast(msg) {
   tT = setTimeout(() => tEl.setAttribute('hidden', ''), 4000)
 }
 // HTTP/API errors carry a message meant for people (ApiError, rpc); anything else gets a generic line
-const human = e => (e && (e.kind || e.status || e.code === 'rpc' || e.code === 'api') && e.message) || say(2) || 'Something went wrong. Try again.'
+const human = e => (e && (e.kind || e.status || e.code === 'rpc' || e.code === 'api') && e.message) || 'Something went wrong. Try again.'
 
 export function guard(C, fb, budget, label) {
   const W = $p => {
@@ -148,11 +145,11 @@ export function guard(C, fb, budget, label) {
       const box = G.document.createElement('div')
       box.setAttribute('role', 'alert')
       box.setAttribute('class', 'brain-fallback')
-      box.textContent = text || fb || say(0) || TEXT
+      box.textContent = text || fb || TEXT
       if (retry) {
         const b = G.document.createElement('button')
         b.setAttribute('type', 'button')
-        b.textContent = label || say(1) || 'Retry'
+        b.textContent = label || 'Retry'
         b.addEventListener('click', () => again())
         box.appendChild(G.document.createTextNode(' '))
         box.appendChild(b)

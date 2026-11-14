@@ -289,7 +289,7 @@ bounded native thread operations and explicit unsupported-capability errors. See
 ## Errors at runtime
 Errors in `fx`, `drv` and handlers are caught: the app stays alive and the error is reported. An effect that re-runs
 more than 100 times in one update is stopped (B0902): never write a signal inside an `fx` that reads it.
-Per component fallback: `<meta fallback="Could not load">` or `{:catch}`; `<meta fallback="No se pudo cargar" retry="Reintentar">` also translates its Retry button. Without it, the default texts follow `<html lang>` (es, pt, fr).
+Per component fallback: `<meta fallback="Could not load">` or `{:catch}`; `<meta fallback="No se pudo cargar" retry="Reintentar">` also translates its Retry button. App-wide default: `brain.json` `"fallback": { "text": "…", "retry": "…" }`.
 Every component is isolated automatically: if it fails, only it shows a fallback with Retry and the rest of the page
 keeps working; a failing click handler keeps the component and shows a toast. Do not write try/catch for that.
 A component that keeps growing (DOM nodes, list rows, effect runs) or loops is stopped and replaced by its fallback;

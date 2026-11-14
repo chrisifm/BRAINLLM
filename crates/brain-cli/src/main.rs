@@ -1022,6 +1022,14 @@ pub(crate) fn lint_rules(app: &Path) -> Option<Vec<(String, String)>> {
     }
 }
 
+/// `brain.json` → `"fallback": {"text": "…", "retry": "…"}`: app-wide fallback text and Retry label (§42).
+pub(crate) fn fallback_texts(app: &Path) -> (Option<String>, Option<String>) {
+    let Some(j) = std::fs::read_to_string(app.join("brain.json")).ok().and_then(|s| brain_mcp::Json::parse(&s).ok()) else { return (None, None) };
+    let Some(f) = j.get("fallback") else { return (None, None) };
+    let text = |k: &str| -> Option<String> { f.get(k).and_then(|v| v.as_str()).map(str::trim).filter(|v| !v.is_empty()).map(|v| v.chars().take(200).collect()) };
+    (text("text"), text("retry"))
+}
+
 fn lint_adjustable(code: &str) -> bool {
     practices::adjustable(code)
 }

@@ -6,12 +6,13 @@
   "changelog": [
     "publishes the launcher only after every platform package tarball",
     "installs that exact version once on first run",
-    "follow `<html lang>`"
+    "text and Retry label of every component at compile time"
   ],
   "guide": "SPEC.md",
   "apis": [],
   "affects": [
     "package.json",
+    "brain.json",
     "views/**",
     "comp/**"
   ]

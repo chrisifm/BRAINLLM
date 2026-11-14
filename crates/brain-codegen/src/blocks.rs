@@ -105,7 +105,8 @@ fn options_key(opts: &Options) -> String {
     hash(&[if opts.dev { "dev" } else { "prod" }, if opts.adopt { "adopt" } else { "create" },
         &opts.runtime, &opts.runtime_dev, &opts.runtime_wc, &opts.import_suffix, &opts.hash_len.to_string(),
         &hash(&env_refs), &i18n.unwrap_or_default(), &hash(&lint),
-        &opts.root.as_ref().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default()])
+        &opts.root.as_ref().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
+        &hash(&[opts.fallback.0.as_deref().unwrap_or("\u{0}"), opts.fallback.1.as_deref().unwrap_or("\u{0}")])])
 }
 
 /// Style-only fast path: the scoped CSS of `src`, exactly as [`crate::compile_with`] would emit it.

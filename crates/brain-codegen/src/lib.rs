@@ -84,6 +84,9 @@ pub struct Options {
     /// Locale being built and its plain (non-plural) texts (`i18n/<locale>.json`, §37): `t('key')` and
     /// `t('key', { n })` with literal keys compile to the text itself. `None` = every `t()` stays a runtime call.
     pub i18n: Option<(String, std::collections::BTreeMap<String, String>)>,
+    /// brain.json `"fallback": {"text": "…", "retry": "…"}`: the app-wide fallback text and Retry label
+    /// (§42) for components without their own `<meta fallback>` / `retry`.
+    pub fallback: (Option<String>, Option<String>),
 }
 
 impl Default for Options {
@@ -100,6 +103,7 @@ impl Default for Options {
             hash_len: 6,
             public_env: Vec::new(),
             i18n: None,
+            fallback: (None, None),
         }
     }
 }
@@ -1485,12 +1489,12 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
         for (start,end) in &mut hmr_literals {*start+=guard_import.len();*end+=guard_import.len();}
         js.insert_str(0,&guard_import);
         js.push_str(&format!("{name}.f = {};\n", js_str(&c.file)));
-        let fb = c.meta.iter().find(|m| m.name == "fallback").and_then(|m| m.value.as_deref()).map(js_str);
+        let fb = c.meta.iter().find(|m| m.name == "fallback").and_then(|m| m.value.as_deref()).or(opts.fallback.0.as_deref()).map(js_str);
         // §30.3: `<meta budget="rows:200000">` raises the runtime fuse (B0908) for this component.
         let budget = brain_check::http::budget(c);
         let limits = if budget.is_empty() { String::new() } else { format!(", {{ {} }}", budget.iter().map(|(k, n)| format!("{k}: {n}")).collect::<Vec<_>>().join(", ")) };
         // `<meta fallback="…" retry="…">`: the Retry button's label in the app's language.
-        let again = c.meta.iter().skip_while(|m| m.name != "fallback").nth(1).filter(|m| m.name == "retry").and_then(|m| m.value.as_deref()).map(js_str);
+        let again = c.meta.iter().skip_while(|m| m.name != "fallback").nth(1).filter(|m| m.name == "retry").and_then(|m| m.value.as_deref()).or(opts.fallback.1.as_deref()).map(js_str);
         match (fb, limits.is_empty(), again) {
             (fb, _, Some(r)) => format!("guard({wrapped}, {}, {}, {r})", fb.unwrap_or_else(|| "undefined".into()), if limits.is_empty() { "undefined".to_string() } else { limits[2..].to_string() }),
             (Some(t), _, None) => format!("guard({wrapped}, {t}{limits})"),
