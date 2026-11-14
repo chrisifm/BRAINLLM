@@ -136,7 +136,7 @@ function toast(msg) {
 // HTTP/API errors carry a message meant for people (ApiError, rpc); anything else gets a generic line
 const human = e => (e && (e.kind || e.status || e.code === 'rpc' || e.code === 'api') && e.message) || 'Something went wrong. Try again.'
 
-export function guard(C, fb, budget, again) {
+export function guard(C, fb, budget, label) {
   const W = $p => {
     const own = I.owner(), end = G.document.createComment('')
     let nodes = [], dispose = null, fails = []
@@ -149,7 +149,7 @@ export function guard(C, fb, budget, again) {
       if (retry) {
         const b = G.document.createElement('button')
         b.setAttribute('type', 'button')
-        b.textContent = again || 'Retry'
+        b.textContent = label || 'Retry'
         b.addEventListener('click', () => again())
         box.appendChild(G.document.createTextNode(' '))
         box.appendChild(b)
