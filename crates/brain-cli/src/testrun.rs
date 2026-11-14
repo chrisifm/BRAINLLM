@@ -175,7 +175,10 @@ pub fn test_files(dir: &Path, out: &mut Vec<PathBuf>) {
             continue;
         }
         if p.is_dir() {
-            test_files(&p, out);
+            // A folder with its own brain.json / tokens.cssbrain / app.brain is another app: its tests run there.
+            if !(crate::scaffold::is_app_dir(&p) || p.join("brain.json").is_file()) {
+                test_files(&p, out);
+            }
         } else if name.ends_with(".test.brain") {
             out.push(p);
         }
@@ -1205,5 +1208,20 @@ mod tests {
         assert_eq!(ax_rule("textbox").unwrap().0, "B0403");
         assert_eq!(ax_rule("image").unwrap().0, "B0401");
         assert!(ax_rule("generic").is_none());
+    }
+
+    #[test]
+    fn test_files_stop_at_a_nested_app() {
+        let root = std::env::temp_dir().join(format!("brain-nested-tests-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for d in ["comp", "child/comp"] { std::fs::create_dir_all(root.join(d)).unwrap(); }
+        std::fs::write(root.join("comp/a.test.brain"), "").unwrap();
+        std::fs::write(root.join("child/brain.json"), "{}").unwrap();
+        std::fs::write(root.join("child/comp/b.test.brain"), "").unwrap();
+        let mut files = Vec::new();
+        test_files(&root, &mut files);
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(files.len(), 1, "{files:?}");
+        assert!(files[0].ends_with("comp/a.test.brain"));
     }
 }

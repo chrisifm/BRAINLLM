@@ -45,7 +45,10 @@ fn load(root: &Path) -> Vec<File> {
                 continue;
             }
             if p.is_dir() {
-                stack.push(p);
+                // A nested app (its own brain.json, tokens.cssbrain or app.brain) is audited on its own.
+                if !["brain.json", "tokens.cssbrain", "app.brain"].iter().any(|f| p.join(f).is_file()) {
+                    stack.push(p);
+                }
                 continue;
             }
             if !(name.ends_with(".brain") || name.ends_with(".jsbrain")) || name.ends_with(".test.brain") {

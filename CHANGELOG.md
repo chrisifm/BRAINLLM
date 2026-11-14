@@ -9,6 +9,13 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.10.17] - 2026-11-14
+
+### Fixed
+
+- `brain test` and `brain doctor` stop at a folder that is another app (its own `brain.json`, `tokens.cssbrain` or
+  `app.brain`); before, a parent app ran the nested apps' tests from the wrong root and failed.
+
 ## [0.10.16] - 2026-11-14
 
 ### Fixed

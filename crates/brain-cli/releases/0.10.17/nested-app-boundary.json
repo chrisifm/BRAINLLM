@@ -1,0 +1,14 @@
+{
+  "id": "nested-app-boundary",
+  "kind": "fix",
+  "title": "Tests and doctor stop at nested apps",
+  "why": "A parent folder holding several BRAINLLM apps ran their tests and audits from the parent root, so dynamic imports failed and doctor timed out.",
+  "changelog": [
+    "stop at a folder that is another app"
+  ],
+  "guide": "SPEC.md",
+  "apis": [],
+  "affects": [
+    "brain.json"
+  ]
+}
