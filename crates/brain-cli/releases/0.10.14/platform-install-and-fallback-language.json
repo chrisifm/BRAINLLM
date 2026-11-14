@@ -1,0 +1,18 @@
+{
+  "id": "platform-install-and-fallback-language",
+  "kind": "fix",
+  "title": "Platform package always installed, fallback texts in the page language",
+  "why": "A platform tarball served after the launcher made npm skip it silently and leave apps without a compiler, and fallback texts stayed in English in Spanish apps unless every component declared them.",
+  "changelog": [
+    "publishes the launcher only after every platform package tarball",
+    "installs that exact version once on first run",
+    "follow `<html lang>`"
+  ],
+  "guide": "SPEC.md",
+  "apis": [],
+  "affects": [
+    "package.json",
+    "views/**",
+    "comp/**"
+  ]
+}

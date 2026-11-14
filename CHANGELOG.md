@@ -9,6 +9,16 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.10.14] - 2026-11-14
+
+### Fixed
+
+- The release publishes the launcher only after every platform package tarball is served by npm; before, an install in
+  that window left the app without its compiler.
+- When npm skipped the platform package, `brain` installs that exact version once on first run instead of failing.
+- The default fallback text, its Retry button and the error toast follow `<html lang>` (Spanish, Portuguese, French);
+  `<meta fallback retry>` still wins.
+
 ## [0.10.13] - 2026-11-14
 
 ### Fixed

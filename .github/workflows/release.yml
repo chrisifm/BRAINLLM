@@ -210,6 +210,16 @@ jobs:
       # platform packages first, so the launcher's optional dependencies exist when it appears
       - run: |
           for f in pkgs/christianirack-brainllm-*-*.tgz; do case "$f" in *runtime*) ;; *) npm publish "./$f" --provenance --access public ;; esac; done
+          # npm can list a version before its tarball is served; a launcher published in that window installs without
+          # its platform package. Wait until every platform tarball answers 200.
+          v='${{ steps.published-version.outputs.version }}'
+          for f in pkgs/christianirack-brainllm-*-*.tgz; do
+            case "$f" in *runtime*) continue ;; esac
+            n=$(basename "$f" .tgz); n=${n#christianirack-}; n=${n%-$v}
+            url="https://registry.npmjs.org/@christianirack/$n/-/$n-$v.tgz"
+            c=0; for i in $(seq 1 60); do c=$(curl -s -o /dev/null -w '%{http_code}' -H 'Cache-Control: no-cache' "$url"); [ "$c" = 200 ] && break; sleep 20; done
+            [ "$c" = 200 ] || { echo "::error::$url is not served ($c)"; exit 1; }
+          done
           npm publish ./pkgs/christianirack-brainllm-runtime-*.tgz --provenance --access public
           npm publish ./pkgs/christianirack-brainllm-[0-9]*.tgz --provenance --access public
           npm publish ./pkgs/christianirack-create-brainllm-*.tgz --provenance --access public

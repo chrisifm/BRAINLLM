@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 // `brain` launcher (INTERNALS §23): runs the native binary of this platform, shipped in one of the
-// @christianirack/brainllm-<os>-<arch> optional dependencies. No postinstall, no download, no dependencies.
+// @christianirack/brainllm-<os>-<arch> optional dependencies. No postinstall and no dependencies; if npm skipped the
+// platform package, it is installed once with npm on first run.
 //
 // 1. A global `brain` delegates to the version the project pins (node_modules/@christianirack/brainllm of the nearest
 //    package.json above the working directory), so two projects on different versions coexist.
 // 2. BRAIN_BINARY=<path> runs that binary instead (local builds, unsupported platforms).
 // 3. Otherwise the platform package's bin/brain(.exe); its exit code and signal pass through unchanged.
 'use strict'
-const { spawn } = require('node:child_process')
+const { spawn, spawnSync } = require('node:child_process')
 const { existsSync, realpathSync } = require('node:fs')
 const { dirname, join, resolve } = require('node:path')
 
@@ -53,9 +54,22 @@ function binary() {
     fail(`no prebuilt brain for ${process.platform}-${process.arch}; fix: build it with \`cargo build --release -p brain-cli\` and set BRAIN_BINARY to target/release/brain`)
   }
   const exe = process.platform === 'win32' ? 'brain.exe' : 'brain'
+  const find = () => join(dirname(require.resolve(`${pkg}/package.json`, { paths: [here] })), 'bin', exe)
   try {
-    return join(dirname(require.resolve(`${pkg}/package.json`, { paths: [here] })), 'bin', exe)
-  } catch {
+    return find()
+  } catch {}
+  // npm skips an optional dependency it could not download (a platform tarball served a moment after the launcher)
+  // and does not retry: install this exact version once next to the launcher, then resolve it again.
+  const project = resolve(here, '..', '..', '..', '..')
+  if (!process.env.BRAIN_PLATFORM_INSTALL && existsSync(join(project, 'node_modules', SCOPE, 'brainllm'))) {
+    const version = require('../package.json').version
+    process.stderr.write(`brain: ${pkg} is missing; installing ${pkg}@${version}\n`)
+    spawnSync('npm', ['install', '--no-save', '--no-audit', '--no-fund', `${pkg}@${version}`], { cwd: project, stdio: ['ignore', 2, 2], shell: process.platform === 'win32', env: { ...process.env, BRAIN_PLATFORM_INSTALL: '1' } })
+    try {
+      return find()
+    } catch {}
+  }
+  {
     fail(`${pkg} is not installed (it is an optional dependency of ${SCOPE}/brainllm); fix: if you ran it with npx right after a release, npm may not have served this package yet and npx keeps the failed install: delete that folder under \`npm config get cache\`/_npx and retry in a few minutes; otherwise reinstall without --no-optional / --omit=optional, e.g. \`npm install ${SCOPE}/brainllm\``)
   }
 }
