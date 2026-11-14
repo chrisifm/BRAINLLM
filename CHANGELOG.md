@@ -9,6 +9,16 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.10.12] - 2026-11-14
+
+### Fixed
+
+- `<meta budget="ms:N steps:N">` now raises the B0910 execution ceilings of the component's code (up to 100× the
+  default); before, the compiler never passed it on and the runtime only allowed lowering them. B0909 accepts `steps`.
+- In the dev overlay, B0910 `ms` overruns (a diagnostic; the page keeps running) show as a warning instead of an error.
+- `<meta fallback="…" retry="…">` sets the label of the fallback's Retry button, so a Spanish app no longer shows
+  "Retry".
+
 ## [0.10.11] - 2026-11-13
 
 ### Added

@@ -243,3 +243,8 @@ test('real list core hook rejects excessive rows before invoking any row rendere
     assert.equal(errors[0].budget, 'rows')
   } finally { disposeRoot?.(); _err(null) }
 })
+
+test('an option raises the steps ceiling above the default (<meta budget="steps:N">)', () => {
+  const f = budgetEnter(meta, null, { steps: 1200000, ms: 20000 })
+  try { for (let i = 0; i < 1100000; i++) budgetStep(f) } finally { budgetLeave(f) }
+})

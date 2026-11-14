@@ -12,7 +12,7 @@ use brain_parse::Span;
 
 const HTTP_ATTRS: &[&str] = &["base", "timeout", "retry", "login"];
 const CLIENT_ATTRS: &[&str] = &["width", "height", "aspect"];
-const BUDGET_KEYS: &[&str] = &["rows", "nodes", "runs", "ms"];
+const BUDGET_KEYS: &[&str] = &["rows", "nodes", "runs", "ms", "steps"];
 
 /// `<meta budget="rows:200000 ms:400">` → `[("rows", 200000), ("ms", 400)]` (valid pairs only; §30.3, RUNTIME #90).
 pub fn budget(c: &Component) -> Vec<(String, u64)> {
@@ -138,7 +138,7 @@ impl Checker<'_> {
             let bad: Vec<&str> = v.split_whitespace().filter(|p| !p.split_once(':').is_some_and(|(k, n)| BUDGET_KEYS.contains(&k) && n.replace('_', "").parse::<u64>().is_ok_and(|n| n > 0))).collect();
             if v.trim().is_empty() || !bad.is_empty() {
                 let what = if bad.is_empty() { "is empty".to_string() } else { format!("has `{}`", bad.join("`, `")) };
-                self.push("B0909", m.span, format!("`<meta budget>` {what}"), "write `key:number` pairs with keys rows, nodes, runs and ms, e.g. `<meta budget=\"rows:200000\">`");
+                self.push("B0909", m.span, format!("`<meta budget>` {what}"), "write `key:number` pairs with keys rows, nodes, runs, ms and steps, e.g. `<meta budget=\"rows:200000\">`");
             }
         }
 

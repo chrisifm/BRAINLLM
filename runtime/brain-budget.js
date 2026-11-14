@@ -5,7 +5,8 @@ const LIMITS = { steps: 1000000, depth: 128, ms: 200, rows: 100000, signals: 100
 const now = () => performance.now()
 const str = (v, n) => typeof v == 'string' ? v.slice(0, n) : null, pos = v => v > 0 ? v | 0 : null
 const metaOf = m => ({ file: str(m?.file, 256), component: str(m?.component, 80), line: pos(m?.line), column: pos(m?.column) })
-const limitsOf = options => Object.fromEntries(Object.entries(LIMITS).map(([k, max]) => [k, Math.min(max, options?.[k] >= 1 ? options[k] : max)]))
+// An option replaces a default (`<meta budget="ms:N steps:N">` raises it), never above 100× the default.
+const limitsOf = options => Object.fromEntries(Object.entries(LIMITS).map(([k, max]) => [k, Math.min(max * 100, options?.[k] >= 1 ? options[k] : max)]))
 const failure = (code, kind, limit, meta) => Object.assign(new Error(`${code}: ${kind} budget exceeded`), { code, kind: 'budget', budget: kind, limit, ...metaOf(meta), fix: code == 'B0910' ? 'Bound the work or use an owned worker.' : 'Bound it; dispose with its owner.' })
 const start = r => { r.running = true; r.started = now() }
 function charge(root) {
@@ -21,7 +22,7 @@ function enforce(frame, kind, value) {
   if (value > r.limits[kind]) {
     const e = failure('B0910', kind, r.limits[kind], frame.meta)
     if (kind != 'ms') throw (r.error = e)
-    r.limits.ms = 1 / 0
+    r.limits.ms = 1 / 0, e.level = 'warning'
     console.warn(e.message += ` at ${e.file}:${e.line}: ${e.measured = value | 0} ms`), I.oops(e, null, 'budget')
   }
 }

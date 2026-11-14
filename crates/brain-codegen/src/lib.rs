@@ -430,6 +430,8 @@ pub(crate) struct Gen<'a> {
     pub(crate) budget_file: String,
     pub(crate) budget_component: String,
     pub(crate) budget_capture_owner: bool,
+    /// `<meta budget="ms:N steps:N">` → `, { ms: N, steps: N }` appended to every `budgetEnter` (B0910 ceilings).
+    pub(crate) budget_opts: String,
     pub(crate) static_form: bool,
     pub(crate) scalar_form: bool,
     pub(crate) static_form_sync: bool,
@@ -1277,6 +1279,10 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
         budget_file: c.file.clone(),
         budget_component: c.name.clone(),
         budget_capture_owner: false,
+        budget_opts: {
+            let own: Vec<String> = brain_check::http::budget(c).into_iter().filter(|(k, _)| k == "ms" || k == "steps").map(|(k, n)| format!("{k}: {n}")).collect();
+            if own.is_empty() { String::new() } else { format!(", {{ {} }}", own.join(", ")) }
+        },
         static_form: false,
         scalar_form: false,
         static_form_sync: false,
@@ -1483,10 +1489,13 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
         // §30.3: `<meta budget="rows:200000">` raises the runtime fuse (B0908) for this component.
         let budget = brain_check::http::budget(c);
         let limits = if budget.is_empty() { String::new() } else { format!(", {{ {} }}", budget.iter().map(|(k, n)| format!("{k}: {n}")).collect::<Vec<_>>().join(", ")) };
-        match (fb, limits.is_empty()) {
-            (Some(t), _) => format!("guard({wrapped}, {t}{limits})"),
-            (None, true) => format!("guard({wrapped})"),
-            (None, false) => format!("guard({wrapped}, undefined{limits})"),
+        // `<meta fallback="…" retry="…">`: the Retry button's label in the app's language.
+        let again = c.meta.iter().skip_while(|m| m.name != "fallback").nth(1).filter(|m| m.name == "retry").and_then(|m| m.value.as_deref()).map(js_str);
+        match (fb, limits.is_empty(), again) {
+            (fb, _, Some(r)) => format!("guard({wrapped}, {}, {}, {r})", fb.unwrap_or_else(|| "undefined".into()), if limits.is_empty() { "undefined".to_string() } else { limits[2..].to_string() }),
+            (Some(t), _, None) => format!("guard({wrapped}, {t}{limits})"),
+            (None, true, None) => format!("guard({wrapped})"),
+            (None, false, None) => format!("guard({wrapped}, undefined{limits})"),
         }
     } else {
         wrapped

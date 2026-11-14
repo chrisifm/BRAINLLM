@@ -1,0 +1,17 @@
+{
+  "id": "budget-and-retry",
+  "kind": "fix",
+  "title": "Raisable execution budget, ms overrun as a warning, translatable Retry",
+  "why": "<meta budget> could not raise the B0910 ceilings (the compiler never passed it and the runtime clamped to the defaults), the non-fatal ms overrun looked like a fatal error in the dev overlay, and the fallback's Retry button was always in English.",
+  "changelog": [
+    "now raises the B0910 execution ceilings",
+    "overruns (a diagnostic; the page keeps running) show as a warning",
+    "`<meta fallback=\"…\" retry=\"…\">` sets the label"
+  ],
+  "guide": "SPEC.md",
+  "apis": [],
+  "affects": [
+    "views/**",
+    "comp/**"
+  ]
+}

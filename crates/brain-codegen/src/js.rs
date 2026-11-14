@@ -550,7 +550,7 @@ impl Gen<'_> {
         let leave = self.budget("budgetLeave");
         let owner = if self.budget_capture_owner { format!("{}Owner", self.budget_prefix) } else { "null".into() };
         let site = self.budget_site(f.span);
-        let body = format!("{{ const {frame} = {enter}({site}, {owner}); try {{ {step}({frame}); {body} }} finally {{ {leave}({frame}); }} }}");
+        let body = format!("{{ const {frame} = {enter}({site}, {owner}{}); try {{ {step}({frame}); {body} }} finally {{ {leave}({frame}); }} }}", self.budget_opts);
         self.scopes.pop();
         (params.join(", "), body)
     }
@@ -646,7 +646,7 @@ impl Gen<'_> {
                     let enter = self.budget("budgetEnter");
                     let leave = self.budget("budgetLeave");
                     let owner = if self.budget_capture_owner { format!("{}Owner", self.budget_prefix) } else { "null".into() };
-                    format!("{p}{{ const {frame} = {enter}({site}, {owner}); try {{ {loop_js} }} finally {{ {leave}({frame}); }} }}\n")
+                    format!("{p}{{ const {frame} = {enter}({site}, {owner}{}); try {{ {loop_js} }} finally {{ {leave}({frame}); }} }}\n", self.budget_opts)
                 } else { format!("{p}{loop_js}\n") }
             }
             Stmt::Return { arg, .. } => match arg {

@@ -285,7 +285,7 @@ function record(e, x, w) {
   else {
     const t = trace(e, c), chain = causes(e, c)
     r = {
-      fp, code: clean(get(e, 'code') || '', 80) || null, type, msg: MSG[get(e, 'code')] || clean(get(e, 'message') || e), where: clean(w || '', 120) || null, comp: c, line,
+      fp, code: clean(get(e, 'code') || '', 80) || null, type, msg: MSG[get(e, 'code')] || clean(get(e, 'message') || e), level: get(e, 'level') == 'warning' ? 'warning' : null, where: clean(w || '', 120) || null, comp: c, line,
       stack: f.slice(0, LIMIT.frames).map(t => `${path(t.url).slice(-1024)}:${t.line}:${t.col}`), location: t.location, generatedLocation: t.generatedLocation, frames: t.frames, causes: chain.entries.map(({ rawFrames, ...item }) => item), truncated: { ...t.truncated, causes: chain.truncated, componentChain: !!(owner && owner.chain && owner.chain.length > 32), breadcrumbs: crumbs.length >= 30, locations: f.some(t => path(t.url).length > 1024), mapping: false }, mapping: { status: opts.maps ? 'pending' : 'disabled' }, crumbs: crumbs.map(c => ({ ...c })),
       build: clean(opts.build || '', 200) || null, ua: G.navigator ? clean(navigator.userAgent, 300) : null, at: Date.now(), last: Date.now(), n: 1,
     }
