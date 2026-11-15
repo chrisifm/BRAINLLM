@@ -81,13 +81,14 @@ export function dev(C) {
 
 // Compiler-only fragment factories record pristine references before dynamic holes insert/move siblings.
 // Per-owner cleanup prevents inactive branches/rows from retaining detached nodes.
-export function fragment(create, hash, index) {
+// svg: the template is a block fragment inside <svg> (compiler flag); its $hmr HTML is re-wrapped so it keeps the SVG namespace.
+export function fragment(create, hash, index, svg) {
   let cached = null, factory = create
   return () => {
     let i = cur?.i?.h === hash ? cur.i : null
     for (let o = owner(); !i && o; o = o.p) { const found = inst.get(o); if (found?.h === hash) i = found }
     const html = i?.C?.$hmr?.templates?.[index]
-    if (typeof html === 'string' && html !== cached) { cached = html; factory = tpl(html) }
+    if (typeof html === 'string' && html !== cached) { cached = html; factory = svg ? tpl(`<svg>${html}</svg>`, 1) : tpl(html) }
     const out = factory()
     if (!i || i.fragmentOverflow) return out
     const nodes = [], roots = out.nodeType === 11 ? [...out.childNodes] : [out]

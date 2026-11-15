@@ -1436,12 +1436,13 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
     for (i, h) in g.templates.iter().enumerate() {
         let tpl = if g.aliased.contains("tpl") { "$tpl" } else { "tpl" };
         // A block fragment of SVG-only elements ({#each}/{#if} inside <svg>) is parsed inside <svg> and unwrapped by
-        // tpl(h, 1), so its nodes get the SVG namespace instead of becoming unknown HTML elements.
+        // tpl(h, 1), so its nodes get the SVG namespace instead of becoming unknown HTML elements. Dev passes the same
+        // flag to fragment(), which rebuilds the template from $hmr (raw HTML) and must wrap it again.
         let (h, svg) = if svg_fragment(h) { (format!("<svg>{h}</svg>"), ", 1") } else { (h.clone(), "") };
         if opts.dev {
             js.push_str(&format!("const $t{i} = {}Fragment({tpl}(", g.budget_prefix));
             let start=js.len();js.push_str(&js_str(&h));hmr_literals.push((start,js.len()));
-            js.push_str(&format!("{svg}), {}, {i});\n",js_str(&g.hash)));
+            js.push_str(&format!("{svg}), {}, {i}{svg});\n",js_str(&g.hash)));
         } else {js.push_str(&format!("const $t{i} = {tpl}({}{svg});\n", js_str(&h)));}
     }
     if !g.ids.is_empty() || g.dyn_ids {

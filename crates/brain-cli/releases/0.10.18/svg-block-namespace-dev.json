@@ -1,0 +1,14 @@
+{
+  "id": "svg-block-namespace-dev",
+  "kind": "fix",
+  "title": "SVG block fragments keep their namespace in dev",
+  "why": "Under brain run, an element rendered by {#each} or {#if} inside <svg> was rebuilt from the hot-reload template as HTML, so it existed in the DOM but did not paint.",
+  "changelog": [
+    "keeps the SVG namespace under `brain run`"
+  ],
+  "guide": "SPEC.md",
+  "apis": [],
+  "affects": [
+    "**/*.brain"
+  ]
+}

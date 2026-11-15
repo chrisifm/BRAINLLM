@@ -9,6 +9,13 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.10.18] - 2026-11-15
+
+### Fixed
+
+- An element inside `{#each}` or `{#if}` within an `<svg>` keeps the SVG namespace under `brain run`; before, the dev
+  hot-reload path rebuilt the block template as HTML, so a `<path>` was in the DOM but never painted.
+
 ## [0.10.17] - 2026-11-14
 
 ### Fixed
