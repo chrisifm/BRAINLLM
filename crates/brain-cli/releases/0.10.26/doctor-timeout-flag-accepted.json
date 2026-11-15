@@ -1,0 +1,12 @@
+{
+  "id": "doctor-timeout-flag-accepted",
+  "kind": "fix",
+  "title": "brain doctor accepts --timeout",
+  "why": "0.10.24 added the doctor test-phase limit, but the command flag table was not updated, so the flag was rejected as unknown before the doctor parsed it.",
+  "changelog": [
+    "is accepted"
+  ],
+  "guide": "SPEC.md",
+  "apis": [],
+  "affects": []
+}

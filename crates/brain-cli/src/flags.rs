@@ -10,7 +10,7 @@ pub(crate) const TABLE: &[(&str, &[&str], &[&str])] = &[
     ("add", &["--props", "--store", "--get", "--post", "--fields", "--policy"], &["--bus", "--key", "--admin-ui", "--blank"]),
     ("check", &[], &[]),
     ("fix", &[], &["--force"]),
-    ("doctor", &[], &["--fix", "--force", "--viewer"]),
+    ("doctor", &["--timeout"], &["--fix", "--force", "--viewer"]),
     ("build", &["--site", "--ext", "--env"], &["--report", "--strict", "--static"]),
     ("run", &["--port", "--host", "--base", "--inspect-port", "--env"], &["--mock", "--profile", "--no-inspect", "--no-trace", "--backend"]),
     ("dev", &["--port", "--host", "--base", "--inspect-port", "--env"], &["--mock", "--profile", "--no-inspect", "--no-trace", "--backend"]),
@@ -169,6 +169,8 @@ mod tests {
         for args in [
             &["test", "comp", "--timeout", "5", "--heap", "--json"][..],
             &["test", "--timeout=5"],
+            &["doctor", "--timeout", "240"],
+            &["doctor", "--fix", "--timeout=120"],
             &["run", "--mock=seed", "--port=5180", "--progress=off"],
             &["add", "comp", "x", "--props", "--looks-like-a-flag"],
             &["find", "x", "--", "--anything"],

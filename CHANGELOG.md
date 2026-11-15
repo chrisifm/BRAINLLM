@@ -9,6 +9,13 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.10.26] - 2026-11-15
+
+### Fixed
+
+- `brain doctor --timeout N` is accepted: 0.10.24 announced it, but the flag table still rejected it as an unknown
+  flag before the doctor read it.
+
 ## [0.10.25] - 2026-11-15
 
 ### Fixed
