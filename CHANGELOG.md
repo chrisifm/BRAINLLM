@@ -9,7 +9,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
-## [0.10.20] - 2026-11-15
+## [0.10.21] - 2026-11-15
 
 ### Added
 
@@ -18,8 +18,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Fixed
 
-- A B0910 steps overrun points at the line that spent the most steps (with its count) instead of the last line
-  checked, so a runaway loop is reported where it spins.
+- A B0910 steps overrun points at the line that spent the most steps instead of the last line checked, so a runaway
+  loop is reported where it spins.
 
 - An element inside `{#each}` or `{#if}` within an `<svg>` keeps the SVG namespace under `brain run`; before, the dev
   hot-reload path rebuilt the block template as HTML, so a `<path>` was in the DOM but never painted.

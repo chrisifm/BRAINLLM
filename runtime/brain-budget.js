@@ -20,26 +20,11 @@ function enforce(frame, kind, value) {
   const r = frame.root
   if (r.error) throw r.error
   if (value > r.limits[kind]) {
-    const at = kind == 'steps' && r.hot ? hottest(r.hot, frame.meta) : null
-    const e = failure('B0910', kind, r.limits[kind], at || frame.meta)
-    if (at) e.message += ` at ${e.file}:${e.line} (${e.steps = at.steps} of the last ${value - (r.limits.steps >> 1)} steps)`
+    const e = failure('B0910', kind, r.limits[kind], kind == 'steps' && r.hm || frame.meta)
     if (kind != 'ms') throw (r.error = e)
     r.limits.ms = 1 / 0, e.level = 'warning'
     console.warn(e.message += ` at ${e.file}:${e.line}: ${e.measured = value | 0} ms`), I.oops(e, null, 'budget')
   }
-}
-// Steps are attributed per source line only in the second half of the budget: a runaway loop dominates it, and the
-// first half pays no bookkeeping. The error points at the line that spent the most steps, not the last one checked.
-function hottest(hot, meta) {
-  let best = meta, n = 0
-  for (const h of hot.values()) if (h.c > n) best = h, n = h.c
-  return { file: best.file, component: meta.component, line: best.line, column: best.column, steps: n }
-}
-function count(r, m) {
-  const hot = r.hot ||= new Map(), k = m.file + ':' + m.line
-  const h = hot.get(k)
-  if (h) h.c++
-  else if (hot.size < 256) hot.set(k, { file: m.file, line: m.line, column: m.column, c: 1 })
 }
 export function budgetOwner() { return I.owner() }
 export function budgetEnter(meta, owner = I.owner(), options) {
@@ -53,6 +38,8 @@ export function budgetEnter(meta, owner = I.owner(), options) {
   active.push(f)
   return f
 }
+// Steps are attributed by a majority vote over source lines (constant memory): a runaway loop dominates them, so the
+// error points at the line that spins, not the last one checked.
 export function budgetStep(frame, site) {
   if (!frame || frame.state != 'active') throw failure('B0910', 'inactive-frame', 0, site)
   if (site) frame.meta = metaOf(site)
@@ -60,8 +47,9 @@ export function budgetStep(frame, site) {
   // A synchronous throw inside a paused await expression must not leave the clock stopped.
   if (frame.paused) frame.paused = 0, start(r)
   charge(r)
-  if (++r.steps > r.limits.steps >> 1) count(r, frame.meta)
-  enforce(frame, 'steps', r.steps)
+  const m = frame.meta
+  r.hm?.line == m.line ? r.hc++ : r.hc ? r.hc-- : (r.hm = m, r.hc = 1)
+  enforce(frame, 'steps', ++r.steps)
   enforce(frame, 'ms', r.work)
 }
 function detach(f) {

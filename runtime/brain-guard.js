@@ -139,7 +139,7 @@ const human = (e, t) => (e && (e.kind || e.status || e.code === 'rpc' || e.code 
 
 // label: the Retry text, or [retry, error] when brain.json sets `"fallback": {"error"}`
 export function guard(C, fb, budget, label) {
-  const [retryText, oops] = Array.isArray(label) ? label : [label]
+  const [retryText, oops] = [].concat(label)
   const W = $p => {
     const own = I.owner(), end = G.document.createComment('')
     let nodes = [], dispose = null, fails = []

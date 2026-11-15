@@ -254,6 +254,6 @@ test('a steps overrun points at the line that spent the most steps, not the last
   const f = budgetEnter(meta, null, { steps: 100 })
   try {
     assert.throws(() => { for (let i = 0; ; i++) budgetStep(f, i % 10 == 9 ? last : hot) },
-      e => e.code === 'B0910' && e.budget === 'steps' && e.line === 12 && e.steps >= 40 && /at comp\/Counter\.brain:12 /.test(e.message))
+      e => e.code === 'B0910' && e.budget === 'steps' && e.line === 12 && e.file === meta.file)
   } finally { budgetLeave(f) }
 })

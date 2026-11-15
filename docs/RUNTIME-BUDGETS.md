@@ -15,7 +15,7 @@ Production and development compiled BrainScript functions have execution checkpo
 | Helper watchdog pending calls | 32 | One explicitly supplied owned worker |
 | Helper watchdog deadline | 30,000 ms | One pending call |
 
-These are finite safety ceilings. An option replaces a default, bounded at 100× it; zero, negative and non-finite values keep the default, so no option can disable a ceiling. A component's `<meta budget="ms:N steps:N">` sets the B0910 `ms` and `steps` ceilings of the executions it starts (and its other keys the B0908 post-render circuit breaker). A steps overrun is attributed per source line during the second half of the budget (at most 256 lines, no cost before that) and reports the line that spent the most steps with its count, not the last line checked. The RPC worker wrapper has its own bounded capacity, deadline and cancellation contract; its documented defaults take precedence over the optional helper watchdog defaults above.
+These are finite safety ceilings. An option replaces a default, bounded at 100× it; zero, negative and non-finite values keep the default, so no option can disable a ceiling. A component's `<meta budget="ms:N steps:N">` sets the B0910 `ms` and `steps` ceilings of the executions it starts (and its other keys the B0908 post-render circuit breaker). A steps overrun is attributed with a majority vote over source lines (constant memory) and reports the line that dominated the steps, not the last line checked. The RPC worker wrapper has its own bounded capacity, deadline and cancellation contract; its documented defaults take precedence over the optional helper watchdog defaults above.
 
 ## Await, ownership and disposal
 
