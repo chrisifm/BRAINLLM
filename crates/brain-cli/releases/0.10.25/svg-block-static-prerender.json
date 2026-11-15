@@ -1,0 +1,14 @@
+{
+  "id": "svg-block-static-prerender",
+  "kind": "fix",
+  "title": "SVG block fragments prerender in static builds",
+  "why": "brain build prerenders pages on a build-time DOM whose document fragments lacked replaceChildren, so a page with {#each} or {#if} inside <svg> failed to prerender.",
+  "changelog": [
+    "prerenders instead of failing"
+  ],
+  "guide": "SPEC.md",
+  "apis": [],
+  "affects": [
+    "**/*.brain"
+  ]
+}

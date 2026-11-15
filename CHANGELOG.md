@@ -9,6 +9,13 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.10.25] - 2026-11-15
+
+### Fixed
+
+- A static build of an `{#each}` or `{#if}` inside `<svg>` prerenders instead of failing with «c.replaceChildren is
+  not a function»: the build-time DOM gives every node `replaceChildren`, which the SVG block template uses.
+
 ## [0.10.24] - 2026-11-15
 
 ### Added

@@ -119,6 +119,11 @@ class Node {
   appendChild(n) {
     return this.insertBefore(n, null)
   }
+  // On every node, not only elements: tpl() unwraps an SVG block fragment with DocumentFragment.replaceChildren.
+  replaceChildren(...ns) {
+    this.textContent = ''
+    for (const n of ns) this.appendChild(n)
+  }
   removeChild(n) {
     const i = indexIn(this, n)
     if (i < 0) throw Error('not a child')
@@ -319,10 +324,6 @@ class Element extends Node {
   }
   get attributes() {
     return [...this.attrs].map(([name, value]) => ({ name, value }))
-  }
-  replaceChildren(...ns) {
-    this.textContent = ''
-    for (const n of ns) this.appendChild(n)
   }
   getAttribute(k) {
     return this.attrs.has(k) ? this.attrs.get(k) : null

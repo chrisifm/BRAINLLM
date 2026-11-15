@@ -399,6 +399,14 @@ test('delegation: many on() calls for one type add one document listener, so a c
   assert.deepEqual(log, ['a2', 'b'])
 })
 
+test('an SVG block template unwraps under the prerender shim (static build of {#each} inside <svg>)', () => {
+  const make = tpl('<svg><path d="M0 0"></path><circle r="1"></circle></svg>', 1)
+  const f = make()
+  assert.equal(f.nodeType, 11)
+  assert.deepEqual(f.childNodes.map(n => n.nodeName.toLowerCase()), ['path', 'circle'])
+  assert.ok(f.childNodes.every(n => n.parentNode === f))
+})
+
 test('a fragment inserts its children in order, once, before the reference', () => {
   const ul = document.createElement('ul')
   const [a, b] = [document.createElement('li'), document.createElement('li')]
