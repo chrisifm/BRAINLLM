@@ -1,0 +1,17 @@
+{
+  "id": "effects-tdz-doctor-timeout-instance-styles",
+  "kind": "fix",
+  "title": "Read-before-declare in effects, doctor test timeout, per-instance styles",
+  "why": "A top-level effect reading a later const emptied the component at runtime with no diagnostic; doctor hid a test timeout behind «did not run»; window listeners were B0111; style:--c and style:background were misjudged by B0302 and B0408.",
+  "changelog": [
+    "reads a `const`/`let` declared below it is an error",
+    "sets the test phase limit like `brain test`",
+    "are known Web globals",
+    "counts as declared for `var(--c)`"
+  ],
+  "guide": "SPEC.md",
+  "apis": [],
+  "affects": [
+    "**/*.brain"
+  ]
+}

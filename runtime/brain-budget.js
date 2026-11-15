@@ -20,7 +20,7 @@ function enforce(frame, kind, value) {
   const r = frame.root
   if (r.error) throw r.error
   if (value > r.limits[kind]) {
-    const e = failure('B0910', kind, r.limits[kind], kind == 'steps' && r.hm || frame.meta)
+    const e = failure('B0910', kind, r.limits[kind], r.hm || frame.meta)
     if (kind != 'ms') throw (r.error = e)
     r.limits.ms = 1 / 0, e.level = 'warning'
     console.warn(e.message += ` at ${e.file}:${e.line}: ${e.measured = value | 0} ms`), I.oops(e, null, 'budget')
@@ -48,7 +48,7 @@ export function budgetStep(frame, site) {
   if (frame.paused) frame.paused = 0, start(r)
   charge(r)
   const m = frame.meta
-  r.hm?.line == m.line ? r.hc++ : r.hc ? r.hc-- : (r.hm = m, r.hc = 1)
+  r.hm?.line == m.line ? r.hc++ : r.hc-- || (r.hm = m, r.hc = 1)
   enforce(frame, 'steps', ++r.steps)
   enforce(frame, 'ms', r.work)
 }

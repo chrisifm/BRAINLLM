@@ -152,7 +152,7 @@ pub const KNOWN_GLOBALS: &[&str] = &[
     "IntersectionObserver", "ResizeObserver", "MutationObserver", "WebSocket", "EventSource", "Worker",
     "BroadcastChannel", "Image", "Audio", "Notification", "matchMedia", "getComputedStyle", "scrollTo",
     "innerWidth", "innerHeight", "devicePixelRatio", "indexedDB", "caches", "reportError", "scheduler",
-    "ServiceWorkerRegistration", "PushManager", "crossOriginIsolated", "isSecureContext", "SharedWorker", "MessageChannel", "MessagePort", "SharedArrayBuffer", "Atomics", "OffscreenCanvas", "WebAssembly", "AudioContext", "AudioWorkletNode", "WorkletAnimation", "ImageBitmap", "createImageBitmap", "CSS", "requestIdleCallback", "cancelIdleCallback", "IDBKeyRange", "self",
+    "ServiceWorkerRegistration", "PushManager", "crossOriginIsolated", "isSecureContext", "SharedWorker", "MessageChannel", "MessagePort", "SharedArrayBuffer", "Atomics", "OffscreenCanvas", "WebAssembly", "AudioContext", "AudioWorkletNode", "WorkletAnimation", "ImageBitmap", "createImageBitmap", "CSS", "requestIdleCallback", "cancelIdleCallback", "IDBKeyRange", "self", "addEventListener", "removeEventListener", "dispatchEvent",
 ];
 
 /// Top-level names of a component and their kind.

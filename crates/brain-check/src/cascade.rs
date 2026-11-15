@@ -159,6 +159,11 @@ impl Walk<'_> {
                         Some(r) => r.bg.clone().flatten().map(|(n, c)| (n, c, r.order, label(r))),
                         None => bg.clone(),
                     };
+                    // `style:background={…}` / `style:color={…}` set a per-instance value the stylesheet cannot see: the
+                    // inherited pair no longer describes this element, so it is not judged against it.
+                    let own = |names: &[&str]| e.attrs.iter().any(|a| a.kind == AttrKind::Style && names.contains(&a.name.as_str()));
+                    let bg2: Bg = if own(&["background", "background-color"]) { None } else { bg2 };
+                    let fg2: Fg = if own(&["color"]) { None } else { fg2 };
                     if has_text(&e.children)
                         && let (Some((fname, f, span, fo, fsel)), Some((bname, b, bo, bsel))) = (&fg2, &bg2)
                         && fo != bo

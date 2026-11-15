@@ -661,6 +661,7 @@ impl<'a> Checker<'a> {
             }
         }
         let c = self.c;
+        self.read_before_declared(&c.script);
         for s in &c.script {
             // Top-level declarations initialised with a primitive are the legal place for sig/drv/ref.
             let module_var = match s {
@@ -1223,6 +1224,68 @@ impl<'a> Checker<'a> {
             self.push_edits("B0129", span, msg, format!("use `{call}`"), vec![(span.start, span.end, call)]);
         } else {
             self.push("B0129", span, msg, "use a path relative to the base, or the router once `navigate()` ships (B0128)");
+        }
+    }
+
+    /// B0134: a top-level `fx(…)` / `watch(…)` runs while the script is still executing, so a `const`/`let` declared
+    /// below it is in its temporal dead zone: the browser throws «Cannot access 'x' before initialization» and the
+    /// whole component renders nothing. A name an inner function parameter rebinds is not reported.
+    fn read_before_declared(&mut self, script: &[Stmt]) {
+        for (i, s) in script.iter().enumerate() {
+            let Stmt::Expr { expr, .. } = s else { continue };
+            let Expr::Call { callee, args, .. } = expr.unparen() else { continue };
+            if !matches!(callee.unparen(), Expr::Ident(k) if matches!(k.name.as_str(), "fx" | "watch")) {
+                continue;
+            }
+            let later: Vec<(String, Span)> = script[i + 1..]
+                .iter()
+                .filter_map(|t| match t {
+                    Stmt::Var(v) if v.kind != VarKind::Var => Some(v),
+                    _ => None,
+                })
+                .flat_map(|v| {
+                    let mut names = Vec::new();
+                    for d in &v.decls {
+                        d.pat.bound_names(&mut names);
+                    }
+                    names.into_iter().map(|n| (n.name.clone(), n.span)).collect::<Vec<_>>()
+                })
+                .collect();
+            if later.is_empty() {
+                continue;
+            }
+            let mut rebound: Vec<String> = Vec::new();
+            for a in args {
+                each_expr(a, &mut |x| {
+                    if let Expr::Func(f) = x {
+                        let mut names = Vec::new();
+                        for p in &f.params {
+                            p.bound_names(&mut names);
+                        }
+                        rebound.extend(names.into_iter().map(|n| n.name.clone()));
+                    }
+                });
+            }
+            let mut hits: Vec<(String, Span)> = Vec::new();
+            for a in args {
+                each_expr(a, &mut |x| {
+                    if let Expr::Ident(id) = x
+                        && later.iter().any(|(n, _)| *n == id.name)
+                        && !rebound.contains(&id.name)
+                        && !hits.iter().any(|(n, _)| *n == id.name)
+                    {
+                        hits.push((id.name.clone(), id.span));
+                    }
+                });
+            }
+            for (name, span) in hits {
+                self.push(
+                    "B0134",
+                    span,
+                    format!("`{name}` is read by an effect that runs before its declaration below"),
+                    format!("move the declaration of `{name}` above this `fx`/`watch`, or declare it as a `function` (functions are hoisted)"),
+                );
+            }
         }
     }
 
@@ -2123,7 +2186,9 @@ impl<'a> Checker<'a> {
                 None => self.push("B0308", span, format!("`--line` as `{name}`: it is the border token"), "use `--fg` or `--muted` for text and `--surface` for fills; keep `--line` for borders"),
             }
         }
-        let local: HashSet<String> = brain_css::custom_props(&sheet).into_iter().map(|p| p.0).collect();
+        // Custom properties the stylesheet declares, plus the per-instance ones the markup sets with `style:--x={…}`.
+        let mut local: HashSet<String> = brain_css::custom_props(&sheet).into_iter().map(|p| p.0).collect();
+        local.extend(style_props(&self.c.template));
         if let Some(tokens) = &self.ctx.tokens {
             let names: Vec<&str> = tokens.iter().map(|t| t.0.as_str()).collect();
             for (name, span) in brain_css::var_refs(&sheet) {
@@ -2471,6 +2536,35 @@ impl<'a> Checker<'a> {
 /// Every expression of a markup subtree, dumped as text (for cheap usage checks).
 /// Lowercased element names this component writes, including inside component children (B0307). `None` when it
 /// renders `{@html}`, whose tags are unknown.
+/// `--x` names set by `style:--x={…}` anywhere in the markup (per-instance custom properties, e.g. a color per row).
+fn style_props(nodes: &[Node]) -> HashSet<String> {
+    fn go(nodes: &[Node], out: &mut HashSet<String>) {
+        for n in nodes {
+            let none: &[Attr] = &[];
+            let (attrs, kids): (&[Attr], Vec<&[Node]>) = match n {
+                Node::Element(e) => (e.attrs.as_slice(), vec![e.children.as_slice()]),
+                Node::ComponentRef(r) => (r.attrs.as_slice(), vec![r.children.as_slice()]),
+                Node::If(b) => (none, b.branches.iter().map(|br| br.body.as_slice()).chain(b.otherwise.as_deref()).collect()),
+                Node::Each(b) => (none, [Some(b.body.as_slice()), b.empty.as_deref()].into_iter().flatten().collect()),
+                Node::SlotScope(b) => (none, vec![b.body.as_slice()]),
+                Node::Await(b) => (none, std::iter::once(b.pending.as_slice()).chain([&b.then, &b.catch].into_iter().flatten().map(|br| br.body.as_slice())).collect()),
+                _ => (none, vec![]),
+            };
+            for a in attrs {
+                if a.kind == AttrKind::Style && a.name.starts_with("--") {
+                    out.insert(a.name.clone());
+                }
+            }
+            for k in kids {
+                go(k, out);
+            }
+        }
+    }
+    let mut out = HashSet::new();
+    go(nodes, &mut out);
+    out
+}
+
 fn element_tags(nodes: &[Node]) -> Option<HashSet<String>> {
     fn go(nodes: &[Node], out: &mut HashSet<String>) -> bool {
         nodes.iter().all(|n| match n {

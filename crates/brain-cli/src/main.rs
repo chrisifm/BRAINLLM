@@ -122,7 +122,7 @@ main:
   brain run [--port 5180] [--backend] [--base /app/] [--mock[=seed]] [--profile] [--no-trace] [--inspect-port N | --no-inspect]  dev server with hot reload; the debugger on port+1; --backend also runs `brain backend serve`
   brain build [--site https://…] [--report] [--strict] [--static] [--ext web|brain]   production (--report: bytes per page before/after each pass; --strict: a page shipped without its content or a route left out fails the build)
   brain preview [--port 4173]         temporary local preview of dist/; Ctrl+C to stop
-  brain doctor [--fix]                everything at once: check + tests + overengineering + leaks; exit ≠ 0 on any error
+  brain doctor [--fix] [--timeout 60] everything at once: check + tests + overengineering + leaks; exit ≠ 0 on any error
   brain start [--port 3000] [--instances N] [--install]   serves dist/ in production (static or server.mjs)
   brain stop | reload | status [path] control the selected project (zero-downtime reload)
 
@@ -2611,6 +2611,9 @@ impl Drop for DoctorOutput {
 
 /// `brain doctor`: check (errors + B10xx overengineering warnings) → tests in Chrome with accessibility → leaks.
 /// A single summary; `ok` is false on any check error or failed test.
+/// Seconds `brain doctor` gives its test phase (`--timeout N`, as `brain test`); 60 by default.
+pub(crate) static DOCTOR_TEST_TIMEOUT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(60);
+
 pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json), String> {
     // doctor = check + tests + leaks (§18): the tests run with the leak watch on. B0602 is a fact and fails; B0601 is
     // a suspicion (retained after GC) reported as a warning unless brain.json opts in with doctor.failOnSuspectedLeaks.
@@ -2627,7 +2630,9 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
         ("diags", brain_mcp::Json::parse(&diags_json(&diags)).unwrap_or(Json::Arr(vec![]))),
     ]);
     #[cfg(unix)]
-    let (test_ok, leaks_ok, test) = match run_tests(root.clone(), 60) {
+    #[cfg(unix)]
+    let test_timeout = DOCTOR_TEST_TIMEOUT.load(std::sync::atomic::Ordering::Relaxed);
+    let (test_ok, leaks_ok, test) = match run_tests(root.clone(), test_timeout) {
         Ok(reports) => {
             let passed = reports.iter().flat_map(|r| &r.tests).filter(|t| t.ok).count();
             let failed = reports.iter().map(|r| r.tests.iter().filter(|t| !t.ok).count() + usize::from(r.load_error.is_some())).sum::<usize>();
@@ -2655,7 +2660,9 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
                 ("files", Json::Arr(reports.iter().map(testrun::FileReport::to_json).collect())),
             ]))
         }
-        Err(e) => (false, true, Json::obj([("error", Json::str(e))])),
+        // A suite that ran out of time says so, with the knob: under heavy machine load a 60 s suite can time out in
+        // doctor while a later `brain test` passes.
+        Err(e) => (false, true, Json::obj([("error", Json::str(if e.contains("timed out") || e.contains("machine load") { format!("{e} (test phase limit {test_timeout} s; raise it with `brain doctor --timeout {}`)", test_timeout * 2) } else { e }))])),
     };
     #[cfg(not(unix))]
     let (test_ok, leaks_ok, test) = (true, true, Json::obj([("skipped", Json::str("brain test needs macOS or Linux"))]));
@@ -2847,13 +2854,25 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
                 _ => vec![],
             }).collect()),
         )]),
-        _ => Json::obj([("skipped", Json::str("the tests did not run"))]),
+        _ => Json::obj([("skipped", Json::str(match test.get("error").and_then(Json::as_str) {
+            Some(e) => format!("not measured: the tests did not run ({})", e.lines().next().unwrap_or("")),
+            None => "the tests did not run".to_string(),
+        }))]),
     };
     Ok((ok, Json::obj([("ok", Json::Bool(ok)), ("failed", Json::Arr(failed.iter().map(|g| Json::str(*g)).collect())), ("check", check), ("test", test), ("build", build), ("seo", seo), ("staticArtifact", static_artifact), ("advice", Json::Arr(advice)), ("heap", heap), ("compatibility", compatibility(app.as_deref()))])))
 }
 
 fn cmd_doctor(args: &[String]) -> ExitCode {
-    let target = positional(args, &[]).first().map(PathBuf::from);
+    match flag(args, "--timeout").map(|t| t.parse::<u64>()) {
+        Some(Ok(t)) if t > 0 => DOCTOR_TEST_TIMEOUT.store(t, std::sync::atomic::Ordering::Relaxed),
+        Some(_) => {
+            let e = "--timeout must be a positive number of seconds; fix: e.g. `brain doctor --timeout 120`";
+            if want_json(args) { println!("{}", error_json(e)) } else { eprintln!("error: {e}") }
+            return ExitCode::from(2);
+        }
+        None => {}
+    }
+    let target = positional(args, &["--timeout"]).first().map(PathBuf::from);
     #[cfg(unix)]
     testrun::set_viewer(testrun::viewer_requested(args, std::env::var("BRAIN_VIEWER").ok().as_deref()));
     let checked = if args.iter().any(|a| a == "--fix") {

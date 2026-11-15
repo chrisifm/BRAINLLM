@@ -115,3 +115,23 @@ fn an_unresolvable_background_hides_the_ancestor_fill_from_the_cascade() {
     // Without the painting rule the white text on the white card is reported.
     assert_eq!(run(".card { background: var(--bg); } .hero p { color: var(--on-accent); }").len(), 1);
 }
+
+// A color per data item (`style:background={…}`, `style:--c={…}` + `var(--c)`): the per-instance property is declared
+// by the markup, so B0302 does not call it unknown, and B0408 no longer judges the text against the ancestor's fill.
+#[test]
+fn per_instance_style_properties_are_declared_and_paint_their_own_background() {
+    let tokens = vec![("--bg".to_string(), "#ffffff".to_string()), ("--on-accent".to_string(), "#ffffff".to_string())];
+    let ctx = brain_check::Ctx { tokens: Some(tokens), ..Default::default() };
+    let run = |markup: &str, css: &str| {
+        let src = format!("<script>\n  let f = {{ color: '#0071e3' }}\n</script>\n<div class=\"card\">{markup}</div>\n<style>{css}</style>\n");
+        let c = brain_parse::parse(&src, Path::new("comp/palette.brain")).unwrap();
+        brain_check::check(&c, &ctx)
+    };
+    let d = run("<button class=\"chip\" style:--c={f.color}>A</button>", ".chip { background: var(--c); color: var(--on-accent); }");
+    assert!(!d.iter().any(|d| d.code == "B0302"), "{d:#?}");
+    let d = run("<button class=\"chip\" style:background={f.color}>A</button>", ".card { background: var(--bg); } .chip { color: var(--on-accent); }");
+    assert!(!d.iter().any(|d| d.code == "B0408"), "{d:#?}");
+    // Without the per-instance background the white text on the white card is still reported.
+    let d = run("<button class=\"chip\">A</button>", ".card { background: var(--bg); } .chip { color: var(--on-accent); }");
+    assert!(d.iter().any(|d| d.code == "B0408"), "{d:#?}");
+}

@@ -386,14 +386,16 @@ test('QA #303: 1,000 rows then 10,000 (a legitimate big list) stays under the de
 })
 
 test('brain.json fallback.error: a handler error without a message for people toasts the app-language text', async () => {
+  globalThis.__brainOops = 'Local handler failure text' // what a compiled component of such an app sets
   const Btn = guard(() => {
     const r = tpl('<div><button class="x">go</button></div>')()
     on(r.firstChild, 'click', () => { throw new TypeError('internal') })
     return r
-  }, 'Local fallback text', undefined, ['Local retry', 'Local handler failure text'])
+  }, 'Local fallback text', undefined, 'Local retry')
   const h = host()
   mount(() => Btn({}), h)
   click(h.querySelector('.x'))
   await tick()
   assert.equal(doc.body.querySelector('.brain-toast').textContent, 'Local handler failure text')
+  delete globalThis.__brainOops
 })

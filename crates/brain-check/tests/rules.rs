@@ -315,3 +315,25 @@ fn b0901_fix_suggests_only_declared_primitives_and_its_shape_checks_clean() {
     assert!(!d.fix.contains("untrack("), "{}", d.fix);
     assert!(codes("<script>let n = sig(0)\nlet src = sig(0)\nwatch(() => src, () => {\n  n = n + 1\n})</script><p>{n}</p><button on:click={() => src++}>go</button>").is_empty());
 }
+
+#[test]
+fn effect_reading_a_const_declared_below() {
+    let diags = |src: &str| {
+        let c = brain_parse::parse(src, Path::new("comp/keys.brain")).unwrap();
+        brain_check::check(&c, &Ctx::default())
+    };
+    // B0134: the effect runs during the script, before `key` is initialized
+    let d = diags("<script>\n  fx(() => { addEventListener('keydown', key); return () => removeEventListener('keydown', key) })\n  const key = (e) => {}\n</script>\n<p>hi</p>\n");
+    let b: Vec<_> = d.iter().filter(|d| d.code == "B0134").collect();
+    assert_eq!(b.len(), 1, "{d:?}");
+    assert!(!d.iter().any(|d| d.code == "B0111"), "addEventListener is a Web global: {d:?}");
+    // declared above, a hoisted function, or a parameter of the same name: fine
+    for ok in [
+        "<script>\n  const key = (e) => {}\n  fx(() => { addEventListener('keydown', key); return () => removeEventListener('keydown', key) })\n</script>\n<p>hi</p>\n",
+        "<script>\n  fx(() => { addEventListener('keydown', key); return () => removeEventListener('keydown', key) })\n  function key(e) {}\n</script>\n<p>hi</p>\n",
+        "<script>\n  fx(() => [1].map((key) => key))\n  const key = 2\n</script>\n<p>{key}</p>\n",
+    ] {
+        let d = diags(ok);
+        assert!(!d.iter().any(|d| d.code == "B0134"), "{ok}: {d:?}");
+    }
+}

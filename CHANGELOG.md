@@ -9,10 +9,14 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
-## [0.10.21] - 2026-11-15
+## [0.10.22] - 2026-11-15
 
 ### Added
 
+- B0134: a top-level `fx`/`watch` that reads a `const`/`let` declared below it is an error; before, `brain check`
+  passed and the browser threw «Cannot access before initialization», leaving the component empty.
+- `brain doctor --timeout N` sets the test phase limit like `brain test`; a suite that runs out of time says so and
+  names the knob, and the leaks line repeats the cause instead of only «the tests did not run».
 - `brain.json` `"fallback": { "error": "…" }` sets the toast a failed event handler shows when its error has no
   message for people; before, it was always the English generic line.
 
@@ -20,9 +24,12 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 - A B0910 steps overrun points at the line that spent the most steps instead of the last line checked, so a runaway
   loop is reported where it spins.
-
 - An element inside `{#each}` or `{#if}` within an `<svg>` keeps the SVG namespace under `brain run`; before, the dev
   hot-reload path rebuilt the block template as HTML, so a `<path>` was in the DOM but never painted.
+- `addEventListener`, `removeEventListener` and `dispatchEvent` are known Web globals (no B0111) for page-wide
+  listeners inside `fx`.
+- A custom property set per instance with `style:--c={…}` counts as declared for `var(--c)` (no B0302), and an
+  element with its own `style:background`/`style:color` is not judged by B0408 against its ancestor's fill.
 
 ## [0.10.17] - 2026-11-14
 

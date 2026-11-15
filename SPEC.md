@@ -88,7 +88,7 @@ Signals are plain variables: `n++`, `items = [...items, x]`. Never mutate in pla
 |---|---|
 | `sig(v)` | reactive state |
 | `drv(() => e)` | derived, read-only |
-| `fx(() => { …; return cleanup })` | side effect; return cleanup for listeners/timers |
+| `fx(() => { …; return cleanup })` | side effect; return cleanup for listeners/timers. It runs while the script executes: declare what it reads above it (B0134). Page-wide keys (Esc, ⌘Z with focus on `body`): `fx(() => { addEventListener('keydown', onKey); return () => removeEventListener('keydown', onKey) })` |
 | `export async function load(ctx)` | views only, runs on server; result arrives as `props`. `throw notFound()` → 404 with `views/404.brain`; `throw gone()` → 410 (removed for good; `views/410.brain`, else the 404 view); `throw redirect('/x')` → 303, `redirect('/new-slug', 301)` for a moved record |
 | `emit('ev', data?)` | event to parent (`on:ev` on the parent) |
 | `ref()` + `bind:ref={r}` | DOM node access (never `document`/`window`) |
@@ -97,7 +97,7 @@ Signals are plain variables: `n++`, `items = [...items, x]`. Never mutate in pla
 | `store(init, {sync?:'tab'\|'storage'})` · `bus('name')` | only in `channels/*.jsbrain`; never `sync: 'storage'` for the signed-in user (another tab's copy brings a logged-out user back): read the user from `load` |
 
 ## Markup
-`{expr}` · `attr={e}` · `class:x={bool}` · `style:prop={v}` · `on:ev={fnRef | (e) => … | statement}` (`on:submit` prevents default)
+`{expr}` · `attr={e}` · `class:x={bool}` · `style:prop={v}` (a per-instance custom property `style:--c={item.color}` is declared for `var(--c)`; an element with its own `style:background` is not judged against its ancestor's fill) · `on:ev={fnRef | (e) => … | statement}` (`on:submit` prevents default)
 · `bind:value|checked|ref={x}` · `{#if c}…{:else if d}…{:else}…{/if}` · `{#each list as it (it.id)}…{:empty}…{/each}`
 (key required; list of primitives → key by value: `{#each perks as perk (perk)}`) · `{#await p}…{:then v}…{:catch e}…{/await}`
 · `<slot />` `<slot name="x" />` · `<Comp a={b} on:ev={f} />`.
@@ -472,7 +472,7 @@ indexing deliberately after review. The guide defines every stable section ID, l
 ## CLI (also MCP: `brain mcp`; every command accepts `--json`)
 Main: `brain new <app>` · `brain run` (dev server with hot reload, app :5180; views render in the browser, so judge
 SEO and the no-JS HTML on `brain build` + `brain start`) · `brain build` (production) ·
-`brain doctor` (everything at once: check + tests + over-engineering + leaks; writes no versioned file; exits non-zero on any error; suspected leak B0601 is a warning unless `doctor.failOnSuspectedLeaks`).
+`brain doctor [--timeout N]` (everything at once: check + tests + over-engineering + leaks; `--timeout` is the test phase limit in seconds, 60 by default, as in `brain test`; writes no versioned file; exits non-zero on any error; suspected leak B0601 is a warning unless `doctor.failOnSuspectedLeaks`).
 Doctor builds and audits fresh private temporary output, then removes it; the app's dist/ stays unchanged.
 `brain seo preview /route --url <origin> --json` inspects one live HTML response, including per-request routes.
 `brain seo diff --from <sitemap.xml|http(s) sitemap URL> --json` compares previous and built sitemap path+query
