@@ -139,7 +139,7 @@ const human = (e, t) => (e && (e.kind || e.status || e.code === 'rpc' || e.code 
 
 // label: the Retry text, or [retry, error] when brain.json sets `"fallback": {"error"}`
 export function guard(C, fb, budget, label) {
-  const [retry, oops] = Array.isArray(label) ? label : [label]
+  const [retryText, oops] = Array.isArray(label) ? label : [label]
   const W = $p => {
     const own = I.owner(), end = G.document.createComment('')
     let nodes = [], dispose = null, fails = []
@@ -152,7 +152,7 @@ export function guard(C, fb, budget, label) {
       if (retry) {
         const b = G.document.createElement('button')
         b.setAttribute('type', 'button')
-        b.textContent = retry || 'Retry'
+        b.textContent = retryText || 'Retry'
         b.addEventListener('click', () => again())
         box.appendChild(G.document.createTextNode(' '))
         box.appendChild(b)
