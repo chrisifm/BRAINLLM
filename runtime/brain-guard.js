@@ -134,9 +134,12 @@ function toast(msg) {
   tT = setTimeout(() => tEl.setAttribute('hidden', ''), 4000)
 }
 // HTTP/API errors carry a message meant for people (ApiError, rpc); anything else gets a generic line
-const human = e => (e && (e.kind || e.status || e.code === 'rpc' || e.code === 'api') && e.message) || 'Something went wrong. Try again.'
+// t: brain.json `"fallback": {"error"}` in the page language (compiled into the guard call)
+const human = (e, t) => (e && (e.kind || e.status || e.code === 'rpc' || e.code === 'api') && e.message) || t || 'Something went wrong. Try again.'
 
+// label: the Retry text, or [retry, error] when brain.json sets `"fallback": {"error"}`
 export function guard(C, fb, budget, label) {
+  const [retry, oops] = Array.isArray(label) ? label : [label]
   const W = $p => {
     const own = I.owner(), end = G.document.createComment('')
     let nodes = [], dispose = null, fails = []
@@ -149,7 +152,7 @@ export function guard(C, fb, budget, label) {
       if (retry) {
         const b = G.document.createElement('button')
         b.setAttribute('type', 'button')
-        b.textContent = label || 'Retry'
+        b.textContent = retry || 'Retry'
         b.addEventListener('click', () => again())
         box.appendChild(G.document.createTextNode(' '))
         box.appendChild(b)
@@ -189,7 +192,7 @@ export function guard(C, fb, budget, label) {
         queueMicrotask(() => fall(e, 'B0908', STOPPED)) // after the run that tripped it
       },
     }
-    const handler = (e, w) => (String(w).startsWith('on:') ? (toast(human(e)), report(e, w)) : fall(e, w))
+    const handler = (e, w) => (String(w).startsWith('on:') ? (toast(human(e, oops)), report(e, w)) : fall(e, w))
     // requests started from this component's handlers (brain-data registers them in `$c`): cancelled with it
     const reqs = new Set()
     const build = () =>

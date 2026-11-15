@@ -87,6 +87,9 @@ pub struct Options {
     /// brain.json `"fallback": {"text": "…", "retry": "…"}`: the app-wide fallback text and Retry label
     /// (§42) for components without their own `<meta fallback>` / `retry`.
     pub fallback: (Option<String>, Option<String>),
+    /// brain.json `"fallback": {"error": "…"}`: the toast a failed event handler shows instead of the English
+    /// generic line (its error carried no message meant for people).
+    pub fallback_error: Option<String>,
 }
 
 impl Default for Options {
@@ -104,6 +107,7 @@ impl Default for Options {
             public_env: Vec::new(),
             i18n: None,
             fallback: (None, None),
+            fallback_error: None,
         }
     }
 }
@@ -1496,6 +1500,11 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
         let limits = if budget.is_empty() { String::new() } else { format!(", {{ {} }}", budget.iter().map(|(k, n)| format!("{k}: {n}")).collect::<Vec<_>>().join(", ")) };
         // `<meta fallback="…" retry="…">`: the Retry button's label in the app's language.
         let again = c.meta.iter().skip_while(|m| m.name != "fallback").nth(1).filter(|m| m.name == "retry").and_then(|m| m.value.as_deref()).or(opts.fallback.1.as_deref()).map(js_str);
+        // brain.json `"fallback": {"error": "…"}` rides with the label as `[retry, error]` (one guard parameter).
+        let again = match (again, opts.fallback_error.as_deref().map(js_str)) {
+            (r, Some(e)) => Some(format!("[{}, {e}]", r.unwrap_or_else(|| "undefined".into()))),
+            (r, None) => r,
+        };
         match (fb, limits.is_empty(), again) {
             (fb, _, Some(r)) => format!("guard({wrapped}, {}, {}, {r})", fb.unwrap_or_else(|| "undefined".into()), if limits.is_empty() { "undefined".to_string() } else { limits[2..].to_string() }),
             (Some(t), _, None) => format!("guard({wrapped}, {t}{limits})"),

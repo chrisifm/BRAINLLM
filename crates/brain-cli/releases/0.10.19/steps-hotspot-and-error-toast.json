@@ -1,0 +1,16 @@
+{
+  "id": "steps-hotspot-and-error-toast",
+  "kind": "fix",
+  "title": "Steps overrun names its hottest line; handler toast in the page language",
+  "why": "B0910 for steps pointed at whichever line was checked last, not the loop that spent the budget, and a failed handler always toasted the English generic text.",
+  "changelog": [
+    "sets the toast a failed event handler shows",
+    "points at the line that spent the most steps"
+  ],
+  "guide": "SPEC.md",
+  "apis": [],
+  "affects": [
+    "brain.json",
+    "**/*.brain"
+  ]
+}

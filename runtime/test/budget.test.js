@@ -248,3 +248,12 @@ test('an option raises the steps ceiling above the default (<meta budget="steps:
   const f = budgetEnter(meta, null, { steps: 1200000, ms: 20000 })
   try { for (let i = 0; i < 1100000; i++) budgetStep(f) } finally { budgetLeave(f) }
 })
+
+test('a steps overrun points at the line that spent the most steps, not the last one checked', () => {
+  const hot = { ...meta, line: 12 }, last = { ...meta, line: 30 }
+  const f = budgetEnter(meta, null, { steps: 100 })
+  try {
+    assert.throws(() => { for (let i = 0; ; i++) budgetStep(f, i % 10 == 9 ? last : hot) },
+      e => e.code === 'B0910' && e.budget === 'steps' && e.line === 12 && e.steps >= 40 && /at comp\/Counter\.brain:12 /.test(e.message))
+  } finally { budgetLeave(f) }
+})

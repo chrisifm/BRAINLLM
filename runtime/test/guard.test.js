@@ -384,3 +384,16 @@ test('QA #303: 1,000 rows then 10,000 (a legitimate big list) stays under the de
   assert.ok(!h2.querySelector('.runaway'), 'stopped')
   assert.ok(reported.some(m => /crossed its nodes budget \(\d+ > 3000\)/.test(m)))
 })
+
+test('brain.json fallback.error: a handler error without a message for people toasts the app-language text', async () => {
+  const Btn = guard(() => {
+    const r = tpl('<div><button class="x">go</button></div>')()
+    on(r.firstChild, 'click', () => { throw new TypeError('internal') })
+    return r
+  }, 'Local fallback text', undefined, ['Local retry', 'Local handler failure text'])
+  const h = host()
+  mount(() => Btn({}), h)
+  click(h.querySelector('.x'))
+  await tick()
+  assert.equal(doc.body.querySelector('.brain-toast').textContent, 'Local handler failure text')
+})

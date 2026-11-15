@@ -1022,12 +1022,18 @@ pub(crate) fn lint_rules(app: &Path) -> Option<Vec<(String, String)>> {
     }
 }
 
-/// `brain.json` → `"fallback": {"text": "…", "retry": "…"}`: app-wide fallback text and Retry label (§42).
+/// `brain.json` → `"fallback": {"text": "…", "retry": "…"}`: app-wide fallback text and Retry label (§42); `"error"` is read by fallback_error.
 pub(crate) fn fallback_texts(app: &Path) -> (Option<String>, Option<String>) {
     let Some(j) = std::fs::read_to_string(app.join("brain.json")).ok().and_then(|s| brain_mcp::Json::parse(&s).ok()) else { return (None, None) };
     let Some(f) = j.get("fallback") else { return (None, None) };
     let text = |k: &str| -> Option<String> { f.get(k).and_then(|v| v.as_str()).map(str::trim).filter(|v| !v.is_empty()).map(|v| v.chars().take(200).collect()) };
     (text("text"), text("retry"))
+}
+
+/// brain.json `"fallback": {"error": "…"}`: the toast text for a failed handler (trimmed, ≤200 chars).
+pub(crate) fn fallback_error(app: &Path) -> Option<String> {
+    let j = std::fs::read_to_string(app.join("brain.json")).ok().and_then(|s| brain_mcp::Json::parse(&s).ok())?;
+    j.get("fallback")?.get("error")?.as_str().map(str::trim).filter(|v| !v.is_empty()).map(|v| v.chars().take(200).collect())
 }
 
 fn lint_adjustable(code: &str) -> bool {
