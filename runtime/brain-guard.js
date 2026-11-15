@@ -120,8 +120,7 @@ function toast(msg) {
   if (!d || !d.body) return
   if (!tEl) {
     tEl = d.createElement('div')
-    tEl.setAttribute('role', 'status')
-    tEl.setAttribute('aria-live', 'polite')
+    tEl.setAttribute('role', 'status') // implies aria-live=polite (WAI-ARIA)
     tEl.setAttribute('class', 'brain-toast')
     tEl.setAttribute('style',
       'position:fixed;left:50%;bottom:16px;translate:-50%;max-width:90vw;z-index:2147483647;padding:10px 14px;' +

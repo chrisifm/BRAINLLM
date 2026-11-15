@@ -7,7 +7,7 @@ const str = (v, n) => typeof v == 'string' ? v.slice(0, n) : null, pos = v => v 
 const metaOf = m => ({ file: str(m?.file, 256), component: str(m?.component, 80), line: pos(m?.line), column: pos(m?.column) })
 // An option replaces a default (`<meta budget="ms:N steps:N">` raises it), never above 100× the default.
 const limitsOf = options => Object.fromEntries(Object.entries(LIMITS).map(([k, max]) => [k, Math.min(max * 100, options?.[k] >= 1 ? options[k] : max)]))
-const failure = (code, kind, limit, meta) => Object.assign(new Error(`${code}: ${kind} budget exceeded`), { code, kind: 'budget', budget: kind, limit, ...metaOf(meta), fix: code == 'B0910' ? 'Bound the work or use an owned worker.' : 'Bound it; dispose with its owner.' })
+const failure = (code, kind, limit, meta) => Object.assign(new Error(`${code}: ${kind} budget exceeded`), { code, kind: 'budget', budget: kind, limit, ...metaOf(meta), fix: 'Bound the work, move it to an owned worker, or dispose it with its owner.' })
 const start = r => { r.running = true; r.started = now() }
 function charge(root) {
   if (root.running) { const t = now(); root.work += t - root.started; root.started = t }

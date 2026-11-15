@@ -9,7 +9,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
-## [0.10.22] - 2026-11-15
+## [0.10.23] - 2026-11-15
 
 ### Added
 
