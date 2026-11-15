@@ -2630,8 +2630,8 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
         ("diags", brain_mcp::Json::parse(&diags_json(&diags)).unwrap_or(Json::Arr(vec![]))),
     ]);
     #[cfg(unix)]
-    #[cfg(unix)]
     let test_timeout = DOCTOR_TEST_TIMEOUT.load(std::sync::atomic::Ordering::Relaxed);
+    #[cfg(unix)]
     let (test_ok, leaks_ok, test) = match run_tests(root.clone(), test_timeout) {
         Ok(reports) => {
             let passed = reports.iter().flat_map(|r| &r.tests).filter(|t| t.ok).count();
