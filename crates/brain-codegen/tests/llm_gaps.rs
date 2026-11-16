@@ -34,7 +34,7 @@ fn dynamic_route_names_and_load_only_imports() {
     let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join("dyn-route");
     std::fs::create_dir_all(root.join("lib")).unwrap();
     std::fs::create_dir_all(root.join("views/users")).unwrap();
-    std::fs::write(root.join("lib/db.jsbrain"), "export const get = async (id) => ({ id })\n").unwrap();
+    std::fs::write(root.join("lib/db.jsbrain"), "export const get = async (id) => ({ id })\nexport default { get }\n").unwrap();
     let src = "<meta seo title=\"U\" description=\"u\">\n<script>\nimport db from '../../lib/db.jsbrain'\nexport async function load(ctx) { return { user: await db.get(ctx.params.id) } }\n</script>\n<main><h1>{props.user.id}</h1></main>";
     let opts = brain_codegen::Options { root: Some(root), ..Default::default() };
     let o = brain_codegen::compile_with(src, Path::new("views/users/[id].brain"), &opts).unwrap_or_else(|d| panic!("{d:?}"));

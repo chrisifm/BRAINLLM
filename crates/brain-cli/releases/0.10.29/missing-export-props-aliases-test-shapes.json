@@ -4,7 +4,7 @@
   "title": "Missing module exports are caught, scaffolding accepts JS type names and samples object props",
   "why": "A default import of a module without export default passed brain check and broke the static build with only a chunk line; add --props rejected arr; generated tests passed {} to object props the component reads deeply; npm create rejected --yes.",
   "changelog": [
-    "B0135",
+    "B0135: a default or named import",
     "writes the usual JS names as SPEC types",
     "the shape the component reads",
     "reports the error's message",
