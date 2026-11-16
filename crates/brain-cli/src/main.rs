@@ -2631,8 +2631,16 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
     ]);
     #[cfg(unix)]
     let test_timeout = DOCTOR_TEST_TIMEOUT.load(std::sync::atomic::Ordering::Relaxed);
+    // The test browser not answering (a loaded machine) is the environment, not the project: try once more before
+    // reporting it, and mark it so the exit code tells it apart from a failing test.
     #[cfg(unix)]
-    let (test_ok, leaks_ok, test) = match run_tests(root.clone(), test_timeout) {
+    let stalled = |e: &str| e.contains("timed out") || e.contains("machine load");
+    #[cfg(unix)]
+    let first_run = run_tests(root.clone(), test_timeout);
+    #[cfg(unix)]
+    let test_run = if first_run.as_ref().is_err_and(|e| stalled(e)) { run_tests(root.clone(), test_timeout) } else { first_run };
+    #[cfg(unix)]
+    let (test_ok, leaks_ok, test) = match test_run {
         Ok(reports) => {
             let passed = reports.iter().flat_map(|r| &r.tests).filter(|t| t.ok).count();
             let failed = reports.iter().map(|r| r.tests.iter().filter(|t| !t.ok).count() + usize::from(r.load_error.is_some())).sum::<usize>();
@@ -2662,7 +2670,8 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
         }
         // A suite that ran out of time says so, with the knob: under heavy machine load a 60 s suite can time out in
         // doctor while a later `brain test` passes.
-        Err(e) => (false, true, Json::obj([("error", Json::str(if e.contains("timed out") || e.contains("machine load") { format!("{e} (test phase limit {test_timeout} s; raise it with `brain doctor --timeout {}`)", test_timeout * 2) } else { e }))])),
+        Err(e) if stalled(&e) => (false, true, Json::obj([("error", Json::str(format!("{e} (test phase limit {test_timeout} s, tried twice; raise it with `brain doctor --timeout {}`)", test_timeout * 2))), ("environment", Json::Bool(true))])),
+        Err(e) => (false, true, Json::obj([("error", Json::str(e))])),
     };
     #[cfg(not(unix))]
     let (test_ok, leaks_ok, test) = (true, true, Json::obj([("skipped", Json::str("brain test needs macOS or Linux"))]));
@@ -2985,7 +2994,10 @@ fn cmd_doctor(args: &[String]) -> ExitCode {
                     }
                 );
             }
-            if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+            // Exit 3 (not the project's fault): the only failed gate is the tests and their browser never answered.
+            let environment = matches!(j.get("failed"), Some(brain_mcp::Json::Arr(g)) if g.len() == 1 && g[0].as_str() == Some("tests"))
+                && matches!(j.get("test").and_then(|t| t.get("environment")), Some(brain_mcp::Json::Bool(true)));
+            if ok { ExitCode::SUCCESS } else if environment { ExitCode::from(3) } else { ExitCode::FAILURE }
         }
     }
 }

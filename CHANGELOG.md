@@ -9,6 +9,22 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.10.27] - 2026-11-16
+
+### Added
+
+- A server module raises its B0910 execution ceiling in its header, `<meta server budget="steps:50000000 ms:5000">`
+  (up to 100× the default), so a legitimate long job no longer has to be split across timers.
+- `brain doctor` tries the tests a second time when their browser does not answer, and exits 3 with
+  `"test":{"environment":true}` when that is the only failure, so a loaded machine is told apart from a failing test.
+
+### Fixed
+
+- B0134 no longer rejects a `watch` callback or a nested listener that reads a declaration below it: they run later.
+  It still reports the effect body, the `watch` source getter and a callback with `immediate`.
+- The server labels the B0910 `ms` overrun as `warning B0910: …` and no longer follows it with
+  `BRAIN_ERROR: Operation failed`: it is a wall-clock warning and the work keeps running.
+
 ## [0.10.26] - 2026-11-15
 
 ### Fixed

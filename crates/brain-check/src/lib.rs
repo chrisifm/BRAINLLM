@@ -1254,8 +1254,18 @@ impl<'a> Checker<'a> {
             if later.is_empty() {
                 continue;
             }
+            // Only code that runs during the script counts: the effect body (`fx`) or the source getter (`watch`,
+            // whose callback waits for a change unless a third argument asks for `immediate`). A nested function
+            // (a listener, the returned cleanup) runs later, when the declaration below has been reached.
+            let is_watch = matches!(callee.unparen(), Expr::Ident(k) if k.name == "watch");
+            let sync: Vec<&Expr> = args.iter().enumerate().filter(|(n, _)| *n == 0 || (is_watch && *n == 1 && args.len() > 2)).map(|(_, a)| a).collect();
             let mut rebound: Vec<String> = Vec::new();
-            for a in args {
+            let mut later_code: Vec<Span> = Vec::new();
+            for a in &sync {
+                let own = match a.unparen() {
+                    Expr::Func(f) => Some(f.span),
+                    _ => None,
+                };
                 each_expr(a, &mut |x| {
                     if let Expr::Func(f) = x {
                         let mut names = Vec::new();
@@ -1263,15 +1273,19 @@ impl<'a> Checker<'a> {
                             p.bound_names(&mut names);
                         }
                         rebound.extend(names.into_iter().map(|n| n.name.clone()));
+                        if Some(f.span) != own {
+                            later_code.push(f.span);
+                        }
                     }
                 });
             }
             let mut hits: Vec<(String, Span)> = Vec::new();
-            for a in args {
+            for a in &sync {
                 each_expr(a, &mut |x| {
                     if let Expr::Ident(id) = x
                         && later.iter().any(|(n, _)| *n == id.name)
                         && !rebound.contains(&id.name)
+                        && !later_code.iter().any(|f| f.start <= id.span.start && id.span.end <= f.end)
                         && !hits.iter().any(|(n, _)| *n == id.name)
                     {
                         hits.push((id.name.clone(), id.span));

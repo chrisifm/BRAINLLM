@@ -36,6 +36,23 @@ import * as Module from 'node:module'
 import { basename, dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
+// B0910 `ms` is a wall-clock warning (a loaded machine inflates it) and the work keeps running: on the server its
+// line is labelled as a warning, and the core's browser fallback line that follows it (`BRAIN_ERROR: …`) is dropped.
+// Done here, not in the runtime, so the client bundle carries no byte for it.
+{
+  const warn = console.warn.bind(console), error = console.error.bind(console)
+  let overrun = false
+  console.warn = (...a) => {
+    overrun = typeof a[0] === 'string' && a[0].startsWith('B0910: ms budget exceeded')
+    overrun ? warn('warning ' + a[0], ...a.slice(1)) : warn(...a)
+  }
+  console.error = (...a) => {
+    const fallback = overrun && a[0] === 'BRAIN_ERROR: Operation failed. Try again.'
+    overrun = false
+    if (!fallback) error(...a)
+  }
+}
+
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.brain': 'text/html; charset=utf-8', '.jsbrain': 'text/javascript; charset=utf-8', '.cssbrain': 'text/css; charset=utf-8',

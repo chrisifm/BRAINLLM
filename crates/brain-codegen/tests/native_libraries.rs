@@ -46,3 +46,13 @@ fn bounded_list_and_text_helpers_import_for_client_and_server_without_capturing_
     let output = brain_codegen::compile("<script>const range = (a,b) => [a,b]; const text = { fold: (value) => value }</script><p>{text.fold(range(1,2).join(','))}</p>", Path::new("comp/local-helpers.brain")).unwrap();
     assert!(!output.js.contains("brain-list.js") && !output.js.contains("brain-text.js"), "{}", output.js);
 }
+
+#[test]
+fn a_server_module_raises_its_execution_budget_in_its_header() {
+    let src = "<meta server budget=\"steps:50000000 ms:5000\">\nexport function pack(rows) { let n = 0; for (const r of rows) n += r; return n }";
+    let output = brain_codegen::compile(src, Path::new("server/pack.jsbrain")).unwrap();
+    let code = output.js + &output.server_js;
+    assert!(code.contains("{ steps: 50000000, ms: 5000 }"), "{code}");
+    let plain = brain_codegen::compile("<meta server>\nexport function pack(rows) { let n = 0; for (const r of rows) n += r; return n }", Path::new("server/pack.jsbrain")).unwrap();
+    assert!(!(plain.js + &plain.server_js).contains("steps:"), "no header budget, no options");
+}

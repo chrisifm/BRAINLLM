@@ -1,0 +1,18 @@
+{
+  "id": "server-budget-doctor-environment-effect-reads",
+  "kind": "fix",
+  "title": "Server execution budget, doctor environment exit and B0134 precision",
+  "why": "A long server job could not declare a larger step ceiling, the wall-clock ms warning was logged like an error, doctor reported an unresponsive test browser like a failing test, and B0134 rejected callbacks that run after the declaration they read.",
+  "changelog": [
+    "raises its B0910 execution ceiling in its header",
+    "tries the tests a second time",
+    "B0134 no longer rejects a `watch` callback",
+    "labels the B0910 `ms` overrun"
+  ],
+  "guide": "SPEC.md",
+  "apis": [],
+  "affects": [
+    "**/*.brain",
+    "**/*.jsbrain"
+  ]
+}

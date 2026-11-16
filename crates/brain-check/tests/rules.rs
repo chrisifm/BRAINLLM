@@ -327,11 +327,22 @@ fn effect_reading_a_const_declared_below() {
     let b: Vec<_> = d.iter().filter(|d| d.code == "B0134").collect();
     assert_eq!(b.len(), 1, "{d:?}");
     assert!(!d.iter().any(|d| d.code == "B0111"), "addEventListener is a Web global: {d:?}");
+    // `immediate` runs the callback during the script, and the source getter always does
+    for bad in [
+        "<script>\n  let q = sig(0)\n  watch(() => q, () => { saved = 1 }, { immediate: true })\n  let saved = sig(0)\n</script>\n<p>{saved}{q}</p>\n",
+        "<script>\n  watch(() => q, () => {})\n  let q = sig(0)\n</script>\n<p>{q}</p>\n",
+    ] {
+        let d = diags(bad);
+        assert_eq!(d.iter().filter(|d| d.code == "B0134").count(), 1, "{bad}: {d:?}");
+    }
     // declared above, a hoisted function, or a parameter of the same name: fine
     for ok in [
         "<script>\n  const key = (e) => {}\n  fx(() => { addEventListener('keydown', key); return () => removeEventListener('keydown', key) })\n</script>\n<p>hi</p>\n",
         "<script>\n  fx(() => { addEventListener('keydown', key); return () => removeEventListener('keydown', key) })\n  function key(e) {}\n</script>\n<p>hi</p>\n",
         "<script>\n  fx(() => [1].map((key) => key))\n  const key = 2\n</script>\n<p>{key}</p>\n",
+        // a `watch` callback waits for a change and a nested listener runs later: both read after the declaration
+        "<script>\n  let q = sig(0)\n  watch(() => q, () => { saved = 1 })\n  let saved = sig(0)\n</script>\n<p>{saved}{q}</p>\n",
+        "<script>\n  let q = sig(0)\n  fx(() => { q; addEventListener('keydown', () => key()) })\n  const key = () => {}\n</script>\n<p>{q}</p>\n",
     ] {
         let d = diags(ok);
         assert!(!d.iter().any(|d| d.code == "B0134"), "{ok}: {d:?}");

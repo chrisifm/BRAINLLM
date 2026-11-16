@@ -88,7 +88,7 @@ Signals are plain variables: `n++`, `items = [...items, x]`. Never mutate in pla
 |---|---|
 | `sig(v)` | reactive state |
 | `drv(() => e)` | derived, read-only |
-| `fx(() => { …; return cleanup })` | side effect; return cleanup for listeners/timers. It runs while the script executes: declare what it reads above it (B0134). Page-wide keys (Esc, ⌘Z with focus on `body`): `fx(() => { addEventListener('keydown', onKey); return () => removeEventListener('keydown', onKey) })` |
+| `fx(() => { …; return cleanup })` | side effect; return cleanup for listeners/timers. It runs while the script executes: declare what it reads above it (B0134; a nested listener and a `watch` callback without `immediate` run later and may read what is declared below). Page-wide keys (Esc, ⌘Z with focus on `body`): `fx(() => { addEventListener('keydown', onKey); return () => removeEventListener('keydown', onKey) })` |
 | `export async function load(ctx)` | views only, runs on server; result arrives as `props`. `throw notFound()` → 404 with `views/404.brain`; `throw gone()` → 410 (removed for good; `views/410.brain`, else the 404 view); `throw redirect('/x')` → 303, `redirect('/new-slug', 301)` for a moved record |
 | `emit('ev', data?)` | event to parent (`on:ev` on the parent) |
 | `ref()` + `bind:ref={r}` | DOM node access (never `document`/`window`) |
@@ -310,7 +310,11 @@ sitemaps; robots stays crawlable so crawlers can read noindex. Rebuild with `--e
 An empty key fails the build (B0720); `KEY?=` declares one the app works without: it may stay empty and reads as unset (a route or webhook whose secret is absent answers 503 until it is set, B0790).
 Read them as `process.env.KEY` (server) or `process.env.PUBLIC_KEY` (anywhere; an undeclared one reads as `undefined`). Never create a `.env`.
 `.jsbrain` files starting with `<meta server>` run only on the server and may be used only inside `load` or server
-functions. Server function in a `.brain`: `server: async function save(ctx, data) {…}`; the client calls
+functions. A long server job (packing many rows) that hits B0910 `steps` raises its ceiling where the execution
+starts: `<meta server budget="steps:50000000 ms:5000">` heading the module whose function or timer starts it, or
+`<meta budget="steps:N">` in the view whose `server:` function calls it (up to 100× the default 1,000,000 steps and
+200 ms). B0910 `ms` is a warning (wall-clock, inflated by a loaded machine): the server logs it as
+`warning B0910: ms budget exceeded at file:line` and the work keeps running. Server function in a `.brain`: `server: async function save(ctx, data) {…}`; the client calls
 `await save(data)` (no `ctx`); only `server:` functions are callable from the browser, never `load`. Validate `data` inside.
 RPC calls do not run the page route's guards or middleware. Authorize each server function using ctx.user and its
 resource policies; a same-origin request is not authentication. `throw { message: 'Title already used' }` (400) or an Error
@@ -472,7 +476,7 @@ indexing deliberately after review. The guide defines every stable section ID, l
 ## CLI (also MCP: `brain mcp`; every command accepts `--json`)
 Main: `brain new <app>` · `brain run` (dev server with hot reload, app :5180; views render in the browser, so judge
 SEO and the no-JS HTML on `brain build` + `brain start`) · `brain build` (production) ·
-`brain doctor [--timeout N]` (everything at once: check + tests + over-engineering + leaks; `--timeout` is the test phase limit in seconds, 60 by default, as in `brain test`; writes no versioned file; exits non-zero on any error; suspected leak B0601 is a warning unless `doctor.failOnSuspectedLeaks`).
+`brain doctor [--timeout N]` (everything at once: check + tests + over-engineering + leaks; `--timeout` is the test phase limit in seconds, 60 by default, as in `brain test`; writes no versioned file; exits non-zero on any error, and 3 with `"test":{"environment":true}` when the only failure is the test browser not answering after two tries (a loaded machine, not the project); suspected leak B0601 is a warning unless `doctor.failOnSuspectedLeaks`).
 Doctor builds and audits fresh private temporary output, then removes it; the app's dist/ stays unchanged.
 `brain seo preview /route --url <origin> --json` inspects one live HTML response, including per-request routes.
 `brain seo diff --from <sitemap.xml|http(s) sitemap URL> --json` compares previous and built sitemap path+query
