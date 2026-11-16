@@ -48,6 +48,33 @@ pub struct Rendered {
     pub probe: Vec<String>,
 }
 
+/// The line of a thrown stack that names the error. A module link error (`import` of a name the module does not
+/// export) starts its stack with `file:///…/_b/<hash>.js:1`, the source line and a caret, and only then
+/// `SyntaxError: …`: reporting the first line hid the cause. Falls back to the first line.
+pub fn headline(stack: &str) -> String {
+    let named = stack.lines().map(str::trim).find(|l| {
+        let head = l.split(':').next().unwrap_or("");
+        !head.is_empty() && head.len() < 40 && head.ends_with("Error") && head.chars().all(|c| c.is_ascii_alphanumeric())
+    });
+    let first = stack.lines().next().unwrap_or("");
+    match named {
+        Some(n) if n != first.trim() => format!("{n} (at {})", first.trim()),
+        Some(n) => n.to_string(),
+        None => first.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod headline_tests {
+    #[test]
+    fn a_link_error_reports_its_message_not_the_chunk_line() {
+        let stack = "file:///tmp/x/_b/ek2ebb3c.js:1\nimport{Ga as a}from\"./b.js\"\n        ^^\nSyntaxError: The requested module './b.js' does not provide an export named 'Ga'\n    at ModuleJob._instantiate";
+        assert_eq!(super::headline(stack), "SyntaxError: The requested module './b.js' does not provide an export named 'Ga' (at file:///tmp/x/_b/ek2ebb3c.js:1)");
+        assert_eq!(super::headline("TypeError: Ga is not a function\n    at x"), "TypeError: Ga is not a function");
+        assert_eq!(super::headline("plain"), "plain");
+    }
+}
+
 /// Upper bound for the whole prerender run.
 const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 

@@ -1620,7 +1620,7 @@ fn build_inner_with_options(
                     }
                 }
             }
-            Some(Err(e)) => return Err(format!("{view}: paths() threw: {}", e.lines().next().unwrap_or(""))),
+            Some(Err(e)) => return Err(format!("{view}: paths() threw: {}", prerender::headline(e))),
             None if options.static_export => return Err(format!("{view}: dynamic route `{route}` needs paths() for static output; fix: enumerate its pages at build time or use automatic output mode")),
             None if can_ssr => pages_of.push((route.clone(), view.clone(), "{}".into(), false, true)),
             None if measure => pages_of.push((route.clone(), view.clone(), "{}".into(), false, false)),
@@ -2077,11 +2077,11 @@ fn build_inner_with_options(
             }
             Some(Err(_)) if p.ssr => String::new(),
             Some(Err(e)) if listed_page => {
-                warnings.push(format!("{}: {EMPTY_LISTED_PAGE} {}: {}", p.view, p.route, e.lines().next().unwrap_or("")));
+                warnings.push(format!("{}: {EMPTY_LISTED_PAGE} {}: {}", p.view, p.route, prerender::headline(e)));
                 String::new()
             }
             Some(Err(e)) => {
-                warnings.push(format!("{}: prerender threw, the page renders on the client: {}", p.view, e.lines().next().unwrap_or("")));
+                warnings.push(format!("{}: prerender threw, the page renders on the client: {}", p.view, prerender::headline(e)));
                 String::new()
             }
             None => String::new(),

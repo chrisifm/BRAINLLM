@@ -348,3 +348,24 @@ fn effect_reading_a_const_declared_below() {
         assert!(!d.iter().any(|d| d.code == "B0134"), "{ok}: {d:?}");
     }
 }
+
+#[test]
+fn importing_what_a_module_does_not_export() {
+    let check = |src: &str| {
+        let c = brain_parse::parse(src, Path::new("comp/probe.brain")).unwrap();
+        let mut ctx = Ctx::default();
+        ctx.module_exports.insert("../lib/route-helper.jsbrain".into(), (vec!["currentTab".into()], false));
+        brain_check::check(&c, &ctx).into_iter().filter(|d| d.code == "B0135").collect::<Vec<_>>()
+    };
+    // B0135: a default import of a module with only named exports is undefined (a static build fails to link)
+    let d = check("<script>\n  import H from '../lib/route-helper.jsbrain'\n  const tab = drv(() => H.currentTab())\n</script>\n<p>{tab}</p>\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(d[0].fix.contains("import { currentTab }"), "{d:?}");
+    assert_eq!(check("<script>\n  import { currentTab, nope } from '../lib/route-helper.jsbrain'\n</script>\n<p>{currentTab()}{nope}</p>\n").len(), 1);
+    for ok in [
+        "<script>\n  import { currentTab } from '../lib/route-helper.jsbrain'\n</script>\n<p>{currentTab()}</p>\n",
+        "<script>\n  import * as H from '../lib/route-helper.jsbrain'\n</script>\n<p>{H.currentTab()}</p>\n",
+    ] {
+        assert!(check(ok).is_empty(), "{ok}");
+    }
+}

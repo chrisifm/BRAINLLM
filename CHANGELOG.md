@@ -9,6 +9,23 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.10.28] - 2026-11-16
+
+### Added
+
+- B0135: a default or named import of something a `.jsbrain` does not export is an error. Before, `brain check`
+  passed and a static build failed with only the chunk line (`no content for the paths() page …/_b/<hash>.js:1`).
+- `brain add comp --props` writes the usual JS names as SPEC types (`arr`/`array` → `list`, `string` → `str`,
+  `number` → `num`, `boolean` → `bool`, `object` → `obj`, `function` → `fn`) instead of rejecting them.
+- The test `brain add comp` generates passes an `obj` prop the shape the component reads (`hist.rows.length` →
+  `{ rows: [] }`) instead of `{}`, so it does not throw before real data is filled in.
+
+### Fixed
+
+- A prerender failure reports the error's message (`SyntaxError: … does not provide an export named …`), not the
+  first line of its stack.
+- `npm create @christianirack/brainllm <name> -- --yes` is accepted; this create tool never asks, so `--yes` is dropped.
+
 ## [0.10.27] - 2026-11-16
 
 ### Added

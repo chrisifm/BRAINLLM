@@ -783,6 +783,55 @@ fn add_test(root: &Path, name: &str) -> Result<PathBuf, String> {
 }
 
 /// `<file>.test.brain` next to `comp`: mounts it and expects it to render.
+/// The shape a component reads from an `obj` prop, as a test sample: `hist.rows.length` → `{ rows: [] }`, so the
+/// generated test does not throw on `{}` before the author fills in real data. Text-level and conservative: a field
+/// used with an array method or in `{#each}` is `[]`, one with `toFixed` is `0`, one read deeper is an object, the
+/// rest `'Example'`.
+fn obj_sample(name: &str, source: &str) -> String {
+    #[derive(Default)]
+    struct Shape { list: bool, num: bool, fields: std::collections::BTreeMap<String, Shape> }
+    const LIST: &[&str] = &["length", "map", "filter", "forEach", "slice", "some", "every", "find", "findIndex", "reduce", "join", "includes", "at", "flatMap", "indexOf", "sort", "toSorted", "entries"];
+    let ident = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '$';
+    let mut root = Shape::default();
+    let bytes: Vec<char> = source.chars().collect();
+    let mut i = 0;
+    while i < bytes.len() {
+        let starts = bytes[i..].iter().take(name.chars().count()).copied().eq(name.chars());
+        if !starts || (i > 0 && (ident(bytes[i - 1]) || bytes[i - 1] == '.')) {
+            i += 1;
+            continue;
+        }
+        let mut j = i + name.chars().count();
+        let mut chain: Vec<String> = Vec::new();
+        loop {
+            let k = if bytes.get(j) == Some(&'?') && bytes.get(j + 1) == Some(&'.') { j + 2 } else if bytes.get(j) == Some(&'.') { j + 1 } else { break };
+            let st = k;
+            let mut e = k;
+            while e < bytes.len() && ident(bytes[e]) { e += 1 }
+            if e == st { break }
+            chain.push(bytes[st..e].iter().collect());
+            j = e;
+        }
+        if chain.is_empty() && j < bytes.len() && ident(bytes[j]) { i += 1; continue }
+        let each = source[..source.char_indices().nth(i).map_or(0, |(b, _)| b)].trim_end().ends_with("{#each");
+        let mut at = &mut root;
+        for (n, seg) in chain.iter().enumerate() {
+            if LIST.contains(&seg.as_str()) { at.list = true; break }
+            if matches!(seg.as_str(), "toFixed" | "toPrecision") { at.num = true; break }
+            at = at.fields.entry(seg.clone()).or_default();
+            if n + 1 == chain.len() && each { at.list = true }
+        }
+        i = j.max(i + 1);
+    }
+    fn show(s: &Shape) -> String {
+        if s.list { return "[]".into() }
+        if s.num { return "0".into() }
+        if s.fields.is_empty() { return "'Example'".into() }
+        format!("{{ {} }}", s.fields.iter().map(|(k, v)| format!("{k}: {}", show(v))).collect::<Vec<_>>().join(", "))
+    }
+    if root.list { "[]".into() } else if root.fields.is_empty() { "{}".into() } else { show(&root) }
+}
+
 fn write_test(root: &Path, comp: &Path) -> Result<PathBuf, String> {
     let file = comp.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
     let path = comp.with_extension("test.brain");
@@ -797,7 +846,7 @@ fn write_test(root: &Path, comp: &Path) -> Result<PathBuf, String> {
         let sample = match prop.ty {
             PropType::Str | PropType::Any => "'Example'",
             PropType::Num => "0", PropType::Bool => "false", PropType::List => "[]",
-            PropType::Obj => "{}", PropType::Fn => "() => {}",
+            PropType::Obj => return format!("{}: {}", prop.name, obj_sample(&prop.name, &source)), PropType::Fn => "() => {}",
         };
         format!("{}: {sample}", prop.name)
     }).collect();
@@ -822,8 +871,19 @@ pub fn validate_props(props: &str) -> Result<String, String> {
         let optional = ty.ends_with('?');
         let rest = ty.trim_end_matches('?');
         let bindable = rest.ends_with('~');
-        let base = rest.trim_end_matches('~');
-        if base.contains(['~', '?']) || ty.matches('?').count() > 1 || ty.matches('~').count() > 1 {
+        let written = rest.trim_end_matches('~');
+        // The usual JS/TS names an LLM reaches for are written as the SPEC type (`arr` → `list`), never rejected.
+        let base = match written {
+            "arr" | "array" => "list",
+            "string" => "str",
+            "number" => "num",
+            "boolean" => "bool",
+            "object" => "obj",
+            "function" => "fn",
+            other => other,
+        };
+        let canonical = format!("{base}{}{}", if bindable { "~" } else { "" }, if optional { "?" } else { "" });
+        if written.contains(['~', '?']) || ty.matches('?').count() > 1 || ty.matches('~').count() > 1 {
             return Err(format!("`{p}`: write the marks after the type, `~` before `?`; fix: `{name}:{}{}{}`", base.trim_matches(['~', '?']), if ty.contains('~') { "~" } else { "" }, if ty.contains('?') { "?" } else { "" }));
         }
         if !TYPES.contains(&base) {
@@ -837,8 +897,8 @@ pub fn validate_props(props: &str) -> Result<String, String> {
             return Err(format!("invalid prop name `{name}`; fix: camelCase, starting with a letter"));
         }
         out.push(match default {
-            Some(d) => format!("{name}:{ty}={d}"),
-            None => format!("{name}:{ty}"),
+            Some(d) => format!("{name}:{canonical}={d}"),
+            None => format!("{name}:{canonical}"),
         });
     }
     Ok(out.join(" "))
@@ -1154,5 +1214,26 @@ mod tests {
         let errors: Vec<_> = brain_check::check(&c, &ctx).into_iter().filter(|d| !d.is_warning()).collect();
         assert!(errors.is_empty(), "{errors:?}");
         fs::remove_dir_all(&app).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod prop_type_aliases {
+    #[test]
+    fn js_type_names_become_the_spec_types() {
+        assert_eq!(super::validate_props("items:arr rows:array~ n:number? on:function").unwrap(), "items:list rows:list~ n:num? on:fn");
+        assert_eq!(super::validate_props("tags:list=[]").unwrap(), "tags:list=[]");
+        assert!(super::validate_props("x:widget").is_err());
+    }
+}
+
+#[cfg(test)]
+mod obj_samples {
+    #[test]
+    fn an_obj_prop_sample_follows_what_the_component_reads() {
+        let src = "<meta props=\"hist:obj\">\n<p>{hist.rows.length} {hist.title} {hist.stats?.avg.toFixed(1)}</p>\n{#each hist.items as it}<i>{it}</i>{/each}";
+        assert_eq!(super::obj_sample("hist", src), "{ items: [], rows: [], stats: { avg: 0 }, title: 'Example' }");
+        assert_eq!(super::obj_sample("user", "<meta props=\"user:obj\">\n<p>hi</p>"), "{}");
+        assert_eq!(super::obj_sample("u", "<p>{users.length} {u}</p>"), "{}", "a longer name that starts with it is not it");
     }
 }

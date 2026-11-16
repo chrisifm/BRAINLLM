@@ -78,7 +78,7 @@ More `<meta>` attributes: `value:str~` (`~` bindable: the child may write it) ·
 
 ## BrainScript (closed JS subset)
 Allowed: let const · arrow/function · if/else · for-of · return · await · try/catch/finally · throw · objects arrays
-spread destructuring · template strings · JS built-ins and Web APIs · `import x from './a.brain'|'./a.jsbrain'|'./a.js'`
+spread destructuring · template strings · JS built-ins and Web APIs · `import x from './a.brain'|'./a.jsbrain'|'./a.js'` (a `.jsbrain` without `export default` is imported by name or as `* as x`; B0135)
 · `export default`/`export const|function` (only .jsbrain, and `load` in views).
 Forbidden: class this var with eval new-Function generators get/set labels for-in for(;;) while switch, dynamic
 `import()` (import statically; each view is its own chunk, and `<Comp lazy />` defers a component).

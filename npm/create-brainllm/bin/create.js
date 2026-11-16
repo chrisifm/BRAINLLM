@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // `npm create @christianirack/brainllm <name>` (also `npx @christianirack/create-brainllm <name>`): runs `brain new`
 // with the brain this package depends on (same version), then installs the app's pinned runtime dependency.
-// Flags after the name go to `brain new`; `--no-install` skips `npm install`.
+// Flags after the name go to `brain new`; `--no-install` skips `npm install`. `--yes`/`-y` (the usual answer to
+// create tools that ask) is accepted and dropped: this one never asks.
 'use strict'
 const { spawnSync } = require('node:child_process')
 const { join } = require('node:path')
@@ -19,6 +20,7 @@ const run = (cmd, argv, cwd) => {
 }
 // BRAIN_NO_DELEGATE: the new app has no node_modules yet; use this package's brain
 process.env.BRAIN_NO_DELEGATE = '1'
-run(process.execPath, [launcher, 'new', ...args.filter((a) => a !== '--no-install')], process.cwd())
+const own = new Set(['--no-install', '--yes', '-y'])
+run(process.execPath, [launcher, 'new', ...args.filter((a) => !own.has(a))], process.cwd())
 if (!args.includes('--no-install')) run('npm', ['install', '--no-audit', '--no-fund'], join(process.cwd(), name))
 process.stdout.write(`\nnext: cd ${name} && npx brain run\n`)

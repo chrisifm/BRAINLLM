@@ -75,6 +75,8 @@ pub struct Ctx {
     pub missing_best: HashMap<String, String>,
     /// Import source → first parse error of a module that exists but does not compile (B0119 says so).
     pub missing_broken: HashMap<String, String>,
+    /// `.jsbrain` import source → (exported names, has `export default`) when every export is a plain name (B0135).
+    pub module_exports: HashMap<String, (Vec<String>, bool)>,
     /// `.brain` import source → its declared channels (§12: emits, expose).
     pub children: HashMap<String, Child>,
     /// Context keys imported from `channels/*.jsbrain` (local name → has a default value).
@@ -256,6 +258,30 @@ pub fn load_ctx(disk_path: &Path, c: &Component) -> (Ctx, Vec<PathBuf>) {
                             }
                         }
                     }
+                }
+            }
+            // B0135: what the module exports, only when every export is a plain name the checker can see.
+            if let Some(m) = &module {
+                let mut named = Vec::new();
+                let mut has_default = false;
+                let mut plain = true;
+                for s in &m.script {
+                    match s {
+                        Stmt::ExportDefault { .. } => has_default = true,
+                        Stmt::Export { decl, .. } => match decl.as_ref() {
+                            Stmt::Var(v) => {
+                                for d in &v.decls {
+                                    if let Pat::Ident(id) = &d.pat { named.push(id.name.clone()) } else { plain = false }
+                                }
+                            }
+                            Stmt::Func(f) => match &f.name { Some(n) => named.push(n.name.clone()), None => plain = false },
+                            _ => plain = false,
+                        },
+                        _ => {}
+                    }
+                }
+                if plain {
+                    ctx.module_exports.insert(i.source.clone(), (named, has_default));
                 }
             }
             let missing=module.is_none();
@@ -964,6 +990,22 @@ impl<'a> Checker<'a> {
                         vec![(i.span.start, end as u32, String::new())],
                     );
                     return;
+                }
+                // B0135: a default or named import the `.jsbrain` module does not export is undefined at runtime; in a
+                // static build it fails the module link and the page never renders.
+                if let Some((named, has_default)) = self.ctx.module_exports.get(&i.source) {
+                    if let Some(d) = &i.default
+                        && !has_default
+                    {
+                        let fix = if named.is_empty() { format!("add `export default {{ … }}` to `{}`", i.source) } else { format!("import what it exports by name, `import {{ {} }} from '{}'`, or `import * as {} from '{}'`", named.join(", "), i.source, d.name, i.source) };
+                        self.push("B0135", i.span, format!("`{}` has no `export default`, so `{}` would be undefined", i.source, d.name), fix);
+                    }
+                    for (imp, _) in &i.named {
+                        if !named.contains(&imp.name) {
+                            let fix = if named.is_empty() { format!("export `{}` from `{}`", imp.name, i.source) } else { format!("`{}` exports {}; import one of those or export `{}` from it", i.source, named.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", "), imp.name) };
+                            self.push("B0135", imp.span, format!("`{}` does not export `{}`", i.source, imp.name), fix);
+                        }
+                    }
                 }
                 if let Some(Imported::Missing) = self.ctx.imports.get(&i.source) {
                     if let Some(first) = self.ctx.missing_broken.get(&i.source) {
