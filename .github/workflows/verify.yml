@@ -36,6 +36,8 @@ jobs:
         run: node scripts/privacy-audit.mjs --history
       - name: Check the generated documentation index
         run: node scripts/gen-docs-index.mjs --check
+      - name: Check persistence lifecycle without waiting for Rust
+        run: node --test --test-timeout=60000 runtime/test/persist-lifecycle.test.js
       - name: Check production cache regressions without waiting for Rust
         run: node --test --test-timeout=60000 runtime/test/server-cache-policy.test.js
 

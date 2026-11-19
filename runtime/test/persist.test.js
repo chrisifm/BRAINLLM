@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 
 const rt = await import('./rt.js')
 const { store, ready } = await rt.sibling('brain-ch.js')
+const { _rt } = await rt.sibling('brain.js')
 const wait = (ms = 150) => new Promise(r => setTimeout(r, ms))
 
 // fake localStorage
@@ -98,4 +99,21 @@ test('private mode (storage access throws): no crash', () => {
   const s = store({ n: 3 }, { persist: true }, 'p:private')
   assert.equal(s.n, 3)
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, writable: true, value: real })
+})
+
+
+test('large changes survive owner disposal before the debounce and during import', async () => {
+  for (const early of [false, true]) {
+    const id = 'p:disposed-big-' + early
+    let state, stop
+    _rt().root(dispose => { stop = dispose; state = store({ items: [] }, { persist: true }, id) })
+    if (!early) await ready()
+    state.items = [{ text: 'x'.repeat(5000) }]
+    stop()
+    await ready()
+    await wait(20)
+    const key = 'brain:p:' + id
+    assert.equal(JSON.parse(ls.get(key)).idb, 1)
+    assert.deepEqual(idb.get(key).d, { items: [{ text: 'x'.repeat(5000) }] })
+  }
 })

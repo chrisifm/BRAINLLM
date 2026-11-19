@@ -1,0 +1,14 @@
+{
+  "id": "canonical-dev-health",
+  "kind": "fix",
+  "title": "Match canonical health probes in development",
+  "why": "Development returned 404 for canonical probes accepted by production. Authored content retains precedence.",
+  "changelog": [
+    "Development health probes accept"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "apis": [],
+  "affects": [
+    "brain.config.*"
+  ]
+}

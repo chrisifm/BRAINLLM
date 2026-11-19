@@ -7,6 +7,28 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
+// Keep one physical line per invocation without re-serializing numbers or string escapes.
+// Payloads are already JSON; only insignificant JSON whitespace outside strings is removed.
+fn compact_frame(input: &str) -> String {
+    let mut out = String::with_capacity(input.len() + 1);
+    let (mut quoted, mut escaped) = (false, false);
+    for ch in input.chars() {
+        if quoted {
+            out.push(ch);
+            if escaped { escaped = false; }
+            else if ch == '\\' { escaped = true; }
+            else if ch == '"' { quoted = false; }
+        } else if ch == '"' {
+            quoted = true;
+            out.push(ch);
+        } else if !matches!(ch, ' ' | '\t' | '\r' | '\n') {
+            out.push(ch);
+        }
+    }
+    out.push('\n');
+    out
+}
+
 /// The API-key client of job and route handlers; route sidecars append it to their runner, job runs to theirs.
 pub const KEY_BACKEND: &str = include_str!("key-backend.js");
 const LLM_MODULE: &str = include_str!("../../../runtime/server/llm.mjs");
@@ -159,7 +181,10 @@ const contextHeaders = async ctx => {
 const finishContext = ctx => { const native = nativeContexts.get(ctx); if (native) { native.res.writableEnded = true; native.res.emit('finish'); native.res.emit('close'); nativeContexts.delete(ctx) } }
 process.once('exit', () => nativeBridge?.close())
 for await (const line of createInterface({ input: process.stdin })) {
-  const { id, file, fn, ctx, args, probe, verification, rpc, raw, key, form, rules, chain, guards, middleware, secret, contextServer, preauthenticated, nativeRequired, locale, dict, timeout, limit } = JSON.parse(line)
+  let request
+  try { request = JSON.parse(line) }
+  catch { process.stderr.write('Invalid private invocation JSON frame\n'); process.exit(1) }
+  const { id, file, fn, ctx, args, probe, verification, rpc, raw, key, form, rules, chain, guards, middleware, secret, contextServer, preauthenticated, nativeRequired, locale, dict, timeout, limit } = request
   traceRid = typeof ctx?.rid === 'string' ? ctx.rid : null
   if (chain) {
     // _guard/_middleware of the route through server.mjs's runChain, with ctx.user from the signed session cookie
@@ -504,8 +529,11 @@ impl Sidecar {
             self.terminate();
             return Err((504,"Private invocation exhausted its deadline before dispatch".into()));
         }
+        // Enforce the existing input budget before normalization, including whitespace supplied by the caller.
+        let within_limit = request.len() <= self.request_limit;
+        let request = if within_limit { compact_frame(&request) } else { request };
         let (ack, done) = std::sync::mpsc::sync_channel(1);
-        let outcome = if request.len() > self.request_limit {
+        let outcome = if !within_limit {
             false
         } else {
             self.input

@@ -614,6 +614,14 @@ impl Read for RequestReader<'_> {
     }
 }
 
+fn health_probe(s: &mut TcpStream, ctx: &Ctx, req: &http::Request) -> io::Result<()> {
+    match ctx.backend_target() {
+        Ok(Some(target)) => native_proxy::serve(s, &target, req, None),
+        Ok(None) => http::respond_with(s, 200, "application/json", b"{\"ok\":true}", req.method == "HEAD", &[("Cache-Control", "no-store")]),
+        Err(_) => http::respond_with(s, 503, "application/json", b"{\"ok\":false}", req.method == "HEAD", &[("Cache-Control", "no-store")]),
+    }
+}
+
 fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
     s.set_write_timeout(Some(Duration::from_secs(5)))?;
     let upload_path=ctx.backend_configured().then(||format!("{}/_brain/uploads",ctx.pre));
@@ -703,11 +711,7 @@ fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
             return http::respond_with(&mut s, 405, "application/json", b"{\"error\":\"Health probes require GET or HEAD\"}", false, &[("Allow", "GET, HEAD"), ("Cache-Control", "no-store")]);
         }
         req.path = probe.to_string();
-        return match ctx.backend_target() {
-            Ok(Some(target)) => native_proxy::serve(&mut s, &target, &req, None),
-            Ok(None) => http::respond_with(&mut s, 200, "application/json", b"{\"ok\":true}", req.method == "HEAD", &[("Cache-Control", "no-store")]),
-            Err(_) => http::respond_with(&mut s, 503, "application/json", b"{\"ok\":false}", req.method == "HEAD", &[("Cache-Control", "no-store")]),
-        };
+        return health_probe(&mut s, ctx, &req);
     }
     if native_proxy::handles(&req.path) {
         match ctx.backend_target(){
@@ -986,6 +990,13 @@ fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
     let i18n = brain_pack::read_i18n(&ctx.root);
     let (_, route_path) = split_locale(&i18n, &req.path);
     let (_,raw_route_path)=split_locale(&i18n,req.raw_path());
+    // Match production's canonical probe fallback without shadowing authored pages or public files.
+    if matches!(req.method.as_str(), "GET" | "HEAD") && native_proxy::is_probe(&req.path)
+        && public_file.is_none() && !static_file.exists()
+        && crate::route::resolve_request(&ctx.root, &route_path, &raw_route_path).is_none_or(|route| route.not_found)
+    {
+        return health_probe(&mut s, ctx, &req);
+    }
     let has_security_chain = public_file.is_some() && crate::route::resolve_request(&ctx.root, &route_path,&raw_route_path)
         .filter(|route| !route.not_found)
         .is_some_and(|route| !chain_files(&ctx.root, &route.view, "_guard.jsbrain").is_empty()
@@ -3179,7 +3190,7 @@ mod tests {
         let backend = std::thread::spawn(move || {
             let start = std::time::Instant::now();
             let mut seen = Vec::new();
-            while seen.len() < 6 && start.elapsed() < Duration::from_secs(10) {
+            while seen.len() < 12 && start.elapsed() < Duration::from_secs(10) {
                 match listener.accept() {
                     Ok((mut socket, _)) => {
                         // BSD sockets inherit the listener's nonblocking mode.
@@ -3208,8 +3219,10 @@ mod tests {
         let mut expected = Vec::new();
         for path in ["/health", "/health/live", "/health/ready"] {
             for method in ["GET", "HEAD"] {
-                responses.push((method, ask(dev.addr, method, &format!("/_brain{path}"))));
-                expected.push((method.to_string(), path.to_string()));
+                for prefix in ["/_brain", ""] {
+                    responses.push((method, ask(dev.addr, method, &format!("{prefix}{path}"))));
+                    expected.push((method.to_string(), path.to_string()));
+                }
             }
         }
         dev.stop();

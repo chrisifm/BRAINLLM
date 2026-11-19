@@ -1049,6 +1049,9 @@ two queued frames, each at most 32 MiB. Load sidecars likewise retain at most tw
 RPC, guard/middleware and form responses share one absolute 30 s deadline and kill/reap Node on timeout or protocol
 closure. Irrelevant response frames cannot renew the deadline. These limits bound protocol retention, not the
 whole process heap or detached descendants of application server code.
+Frame correction (2026-11-19): the shared sender removes JSON whitespace outside strings before appending one newline,
+keeping formatted contexts and plural dictionaries in one frame without changing numeric tokens or string escapes.
+The byte budget still counts the original input. Invalid JSON terminates the child with a generic diagnostic.
 
 Priority order for every decision: (1) an agent can finish the task alone, (2) correctness, (3) speed, (4) human
 ergonomics. A feature that only a human can use is never on the critical path.
@@ -1628,6 +1631,8 @@ native API/auth traffic keeps its backend upstream. Existing deployment files re
 Rust production and dev gateways use the same exact alias map to `/health`, `/health/live` and `/health/ready` before
 native forwarding. Production keeps the base namespace/root probe behavior and existing `/health` app-file precedence;
 GET/HEAD preserve upstream status and no-store responses, with a healthy JSON answer when no backend is configured.
+Canonical dev probes (2026-11-19): `/health`, `/health/live` and `/health/ready` use the same fallback after the base
+prefix is removed. Authored public files and resolved page routes retain precedence.
 
 Static gateway rebuilds (2026-11-04): `StaticGateway` keeps an Arc policy snapshot under a short mutex. Metadata
 identity/mtime/length for the output directory, index/not-found pages and host-policy files triggers refresh of cached
@@ -1835,6 +1840,10 @@ failure in a particular browser or CDN. GET responses retain fresh per-response 
 - `store(init, { persist: true })` saves the store to IndexedDB (localStorage below 4 KB), restores it before the
   first render, and versions it by the shape of `init`: a changed shape discards the old data instead of crashing.
   Quota and private-mode errors fall back to memory and are reported once, never thrown.
+  Lifecycle correction (2026-11-19): small snapshots save on the effect flush, pagehide, hidden-document transition
+  and owner disposal. The owner is captured before the lazy import; early disposal preserves the last edit
+  without attaching effects. Large snapshots retain the 100 ms IndexedDB debounce and flush on subtree disposal; document exit cannot guarantee
+  completion of asynchronous storage.
 
 **5. Web Workers** (COMPILER + RUNTIME)
 - A module named `*.worker.jsbrain` (or `*.worker.js`) runs in a dedicated Web Worker; importing it gives the same
