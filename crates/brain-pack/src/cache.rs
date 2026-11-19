@@ -222,7 +222,7 @@ fn google_static_headers(headers:String,paths:&BTreeMap<String,String>,build:&st
     out
 }
 fn google_nginx(paths:&BTreeMap<String,String>,pre:&str,build:&str,http:bool,csp:&str)->String {
-    let mut out=String::new();for (path,file) in paths {out.push_str(&format!("location = {pre}{path} {{\n"));for (key,value) in SECURITY.iter().copied().chain(security_doc(&csp)) {let value=if key=="Cross-Origin-Opener-Policy" {"same-origin-allow-popups"}else{value};out.push_str(&format!("    add_header {key} \"{value}\" always;\n"));}out.push_str(&format!("    add_header Content-Security-Policy \"{csp}\" always;\n"));if http {out.push_str(&format!("    etag on;\n    add_header Cache-Control \"{REVALIDATE}\";\n    add_header X-Brain-Build {build};\n"));}out.push_str(&format!("    try_files $uri $uri/index.html {pre}{file} =404;\n}}\n"));}out
+    let mut out=String::new();for (path,file) in paths {out.push_str(&format!("location = {pre}{path} {{\n"));for (key,value) in SECURITY.iter().copied().chain(security_doc(&csp)) {let value=if key=="Cross-Origin-Opener-Policy" {"same-origin-allow-popups"}else{value};out.push_str(&format!("    add_header {key} \"{value}\" always;\n"));}out.push_str(&nginx_csp(csp));if http {out.push_str(&format!("    etag on;\n    add_header Cache-Control \"{REVALIDATE}\";\n    add_header X-Brain-Build {build};\n"));}out.push_str(&format!("    try_files $uri $uri/index.html {pre}{file} =404;\n}}\n"));}out
 }
 
 /// Applies §35 to the built files. `files` holds text files, `binary` raw ones (copied `public/` assets).
@@ -794,6 +794,29 @@ pub fn nginx_at(build_hash: &str, http: bool, csp: &str, pre: &str) -> String {
         .replace("location ~ (^/$|/$|\\.html$)", &format!("location ~ (^{pre}/$|/$|\\.html$)"))
 }
 
+/// nginx rejects any directive parameter longer than its 4 KiB buffer (`too long parameter`). A static site lists one
+/// hash per inline page script, so its CSP outgrows that: it is split into `set` variables the header joins back,
+/// which serves the same bytes.
+const NGINX_PARAM: usize = 3000;
+fn nginx_csp(csp: &str) -> String {
+    if csp.len() <= NGINX_PARAM {
+        return format!("    add_header Content-Security-Policy \"{csp}\" always;\n");
+    }
+    let (mut out, mut joined, mut rest, mut i) = (String::new(), String::new(), csp, 0);
+    while !rest.is_empty() {
+        let mut cut = rest.len().min(NGINX_PARAM);
+        while !rest.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        out.push_str(&format!("    set $brain_csp_{i} \"{}\";\n", &rest[..cut]));
+        joined.push_str(&format!("$brain_csp_{i}"));
+        rest = &rest[cut..];
+        i += 1;
+    }
+    out.push_str(&format!("    add_header Content-Security-Policy \"{joined}\" always;\n"));
+    out
+}
+
 pub fn nginx(build_hash: &str, http: bool, csp: &str) -> String {
     nginx_private(build_hash, http, csp, "")
 }
@@ -811,7 +834,7 @@ fn nginx_private(build_hash: &str, http: bool, csp: &str, pre: &str) -> String {
     for (k, v) in security_doc(csp) {
         doc.push_str(&format!("    add_header {k} \"{v}\" always;\n"));
     }
-    doc.push_str(&format!("    add_header Content-Security-Policy \"{csp}\" always;\n"));
+    doc.push_str(&nginx_csp(csp));
     if !http {
         return format!("# BRAINLLM build {build_hash}: include this file inside the app's server {{}} block (root = dist/).\n{private}location / {{\n{doc}    try_files $uri $uri/index.html $uri.html =404;\n}}\n");
     }
@@ -1120,6 +1143,22 @@ fn walk(base: &Path, dir: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_long_csp_is_split_under_the_nginx_parameter_limit() {
+        let csp = format!("default-src 'self'; script-src 'self' {}", (0..150).map(|i| format!("'sha256-{i:0>43}='")).collect::<Vec<_>>().join(" "));
+        assert!(csp.len() > 4096);
+        for conf in [super::nginx("b1", true, &csp), super::nginx("b1", false, &csp)] {
+            assert!(conf.lines().all(|l| l.len() < 4000), "a line passes nginx's parameter limit");
+            let block = conf.split("location / {").nth(1).unwrap().split("\n}").next().unwrap();
+            let joined: String = block.lines().filter_map(|l| l.trim().strip_prefix("set $brain_csp_"))
+                .map(|l| l.split_once(" \"").unwrap().1.trim_end_matches("\";").to_string()).collect();
+            assert_eq!(joined, csp);
+            assert!(block.contains("add_header Content-Security-Policy \"$brain_csp_0$brain_csp_1"), "{block}");
+        }
+        let short = super::nginx("b1", true, "default-src 'self'");
+        assert!(short.contains("add_header Content-Security-Policy \"default-src 'self'\" always;") && !short.contains("set $brain_csp"));
+    }
+
     #[test]
     fn static_preload_headers_retain_styles_within_the_byte_budget() {
         let mut html = String::new();

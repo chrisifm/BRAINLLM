@@ -1,0 +1,14 @@
+{
+  "id": "nginx-long-csp",
+  "kind": "fix",
+  "title": "A long Content-Security-Policy no longer breaks the generated nginx config",
+  "why": "Static sites with about a hundred pages produced a CSP over nginx's 4 KiB parameter limit, so nginx refused the generated _brain/nginx.conf; it is now split into set variables and served unchanged.",
+  "changelog": [
+    "splits a Content-Security-Policy longer than 3000 bytes"
+  ],
+  "guide": "SPEC.md",
+  "apis": [],
+  "affects": [
+    "**/*.brain"
+  ]
+}

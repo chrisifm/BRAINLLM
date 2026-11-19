@@ -9,6 +9,15 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.10.30] - 2026-11-19
+
+### Fixed
+
+- The generated `_brain/nginx.conf` splits a Content-Security-Policy longer than 3000 bytes into `set` variables the
+  header joins back. A static site lists one inline script hash per page, so with about a hundred pages the CSP passed
+  nginx's 4 KiB parameter limit and `nginx -t` failed with `too long parameter`. The served header is byte for byte
+  the same.
+
 ## [0.10.29] - 2026-11-16
 
 ### Added
