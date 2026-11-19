@@ -94,6 +94,11 @@ state. Optional state fields still warn. This advisory is not a substitute for a
 ```
 `edits`: 1-based, exclusive end; empty when the fix requires judgment. `Diag::apply(src, &edits)` is used by `brain fix`.
 
+UTF-8 input safety (2026-11-19): the block-order scan advances by Unicode scalar boundaries, including whitespace.
+Hex colors reject non-ASCII input before fixed-width slicing. Split selectors require a closing attribute bracket
+and an ASCII selector prefix before slicing; malformed selectors return an ordinary error. Regression coverage
+includes two-, three- and four-byte text, reorder edits, incomplete selectors and valid Unicode selector values.
+
 Every Diag has `level`: `error` (blocks) · `warning` (`is_warning`, does not block) · `info` (`is_info`, deterministic
 normalization applied by `compile_with` on its own when no real error remains, §21).
 
@@ -154,6 +159,7 @@ COMPILER assigns the next free code there in the same change that emits it, then
 - B0786 own session with a native backend (warning, 2026-10-31, `crates/brain-cli/src/env.rs` `own_session`): `ctx.session.set` in a file that does not branch on the backend, in an app whose `.brain_env` sets `BRAIN_BACKEND_URL` without `BRAIN_BACKEND_SESSION=app`.
 - B0785 backend environment not stated (error, 2026-10-31, `crates/brain-cli/src/backend.rs` `unstated_environment`): every `brain backend`, `brain jobs`, `brain media` and `brain analytics` operation that connects stops without `--env` on a remote database or NODE_ENV=production; NODE_ENV is checked before the database lookup, so B0762 cannot hide it. Outside production `/_brain/api` also needs admin for any proxied request.
 - B0795 no `csp.connectSrc` in brain.json (warning, `crates/brain-cli/src/origin_check.rs`) · B0796 invalid CSP source entry (error; the entry stays out of the policy). `brain_pack::cache::app_csp` is the one place the connect list replaces `https: wss:`; the build's own sources (sockets, analytics tags, Google sign-in) stay as `extra`. The `_headers`, nginx, Caddy, `dist/server.mjs` manifest and the `brain run` report-only policy all come from it. `CSP0` in `runtime/server/server.mjs` only serves a manifest with no `csp`, which no current build writes.
+- Framing origin validation (2026-11-19): the local HTTP exception in `frame_ancestor_problem` uses the same whole-authority validation as TLS origins before checking locality. Paths, empty or malformed ports, quotes, controls and policy delimiters are rejected and excluded through B0796; existing loopback wildcard ports and exact single-label LAN origins remain supported.
 - Explicit `csp.formAction` (2026-11-04) adds exact HTTPS document origins or local HTTP loopback origins to the existing own-origin form-action. `form_action_problem` rejects wildcard hosts/ports, paths, sockets, blobs and header injection; `read_form_action` shares bounded-list validation and B0796 with check/doctor. `cache::app_csp` adds only this directive, so static host configurations, SSR manifests and dev report-only policy stay aligned without widening connect/script/framing permissions.
 - Explicit `csp.mediaSrc` / `csp.workerSrc` (2026-11-04) accept `blob:` and exact TLS origins, plus plain HTTP loopback origins. Each is independently optional: omission preserves its CSP fallback, while a declared list emits `'self'` plus validated sources (an empty or wholly invalid list remains own-origin only). They do not add blob permission to script-src. Validation, the schema and both check/doctor use B0796; no wildcard host or port, data URL, path or header injection is accepted.
 - B0794 unique value any user can claim (warning, `backend.rs` `claimable_unique_warnings`): a `unique` field with no `access` on a resource whose `create` or `update` grants `user` or `public`; an explicit `access`, including `{ write: ['user'] }`, states who may and silences it.
@@ -1746,8 +1752,9 @@ impossible while developing.
   Both production servers revalidate these unhashed manifests (`no-cache`) instead of retaining a stale playlist.
 - `/_b/*` (content-hashed JS, CSS, fonts, images): `public, max-age=31536000, immutable`.
 - Relocatable assets in `public/` that HTML or CSS reference are copied into `/_b/` with a hash and their references
-  rewritten, so they become immutable too. Static-host rules revalidate unhashed public files; Node revalidates
-  streaming manifests and uses `public, max-age=3600` for other public assets.
+  rewritten, so they become immutable too. Static-host rules and Node revalidate all unhashed public files with
+  `no-cache` (aligned 2026-11-19), including direct and negotiated Markdown twins. Conditional and range responses
+  retain that policy; a compressed 304 retains its selected content encoding, ETag and Vary.
 - HTML: `no-cache` plus a strong `ETag` (the build's content hash) → a repeat visit gets `304` with no body. No
   `no-store` on public pages (it disables bfcache, §19). Anonymous SSR HTML: `no-cache` and a weak ETag of the
   rendered body. SSR HTML rendered with a session cookie (valid or stale): `private, no-store` and no ETag, so Back
@@ -1852,8 +1859,8 @@ different signature so nothing old stays cached by mistake")
   (`brain-<sig>`), `/_health` (`{"ok":true,"build":"<sig>"}`) and `brain status`. An agent checks a deploy by
   comparing the signature `brain build` printed with the one `/_health` returns.
 - Nothing can stay stale:
-  - HTML, `sw.js` and streaming manifests are revalidated on every request; static-host rules also revalidate other
-    unhashed public files (Node retains those for up to one hour). Content-hashed files get a new URL when changed.
+  - HTML, `sw.js`, streaming manifests and other unhashed public files are revalidated on every request in both
+    hosting paths. Content-hashed files get a new URL when changed.
   - The registration uses `updateViaCache: 'none'`, so the browser never serves `sw.js` or its imports from the HTTP
     cache; the page also calls `registration.update()` on every full load.
   - A new service worker deletes every cache except its own and the previous build's (kept one generation only for

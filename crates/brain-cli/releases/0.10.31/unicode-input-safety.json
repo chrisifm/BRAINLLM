@@ -1,0 +1,10 @@
+{
+  "id": "unicode-input-safety",
+  "kind": "fix",
+  "title": "Keep checker input and split selectors safe at UTF-8 boundaries",
+  "why": "Multibyte markup, malformed hex colors and incomplete selectors could panic instead of producing diagnostics or an ordinary split error.",
+  "changelog": ["The checker preserves UTF-8 boundaries"],
+  "guide": "docs/INTERNALS.md",
+  "apis": [],
+  "affects": ["**/*.brain", "**/*.cssbrain"]
+}

@@ -21,6 +21,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Audit source and reachable Git history before compilation
+        run: node scripts/privacy-audit.mjs --history
+      - name: Check the generated documentation index
+        run: node scripts/gen-docs-index.mjs --check
+      - name: Check production cache regressions without waiting for Rust
+        run: node --test --test-timeout=60000 runtime/test/server-cache-policy.test.js
+
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 30

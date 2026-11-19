@@ -1,0 +1,11 @@
+{
+  "id": "local-framing-origin-validation",
+  "kind": "fix",
+  "title": "Validate complete local framing origins before emitting CSP",
+  "why": "The local HTTP framing exception checked only the host prefix, allowing malformed origin suffixes into generated security policies. The existing B0796 error now excludes them.",
+  "changelog": ["Local HTTP framing origins now validate the complete authority"],
+  "guide": "docs/INTERNALS.md",
+  "codes": ["B0796"],
+  "apis": [],
+  "affects": ["brain.json"]
+}

@@ -1,0 +1,10 @@
+{
+  "id": "public-file-revalidation",
+  "kind": "fix",
+  "title": "Revalidate unhashed public files consistently across production hosts",
+  "why": "Node could serve public assets from a browser cache for an hour after a deployment while static-host output already required revalidation. Hashed assets remain immutable.",
+  "changelog": ["The Node server revalidates unhashed public files"],
+  "guide": "docs/INTERNALS.md",
+  "apis": [],
+  "affects": ["public/**"]
+}

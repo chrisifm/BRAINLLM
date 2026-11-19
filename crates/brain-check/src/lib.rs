@@ -2930,6 +2930,8 @@ pub fn resolve_color(v: &str, tokens: &[(String, String)]) -> Option<(String, (f
 /// `#rgb` / `#rrggbb` → linear-ready sRGB components in 0..1.
 pub fn parse_hex(v: &str) -> Option<(f64, f64, f64)> {
     let h = v.trim().strip_prefix('#')?;
+    // Hex digits are ASCII; reject other text before slicing fixed byte widths.
+    if !h.is_ascii() { return None; }
     let (r, g, b) = match h.len() {
         3 | 4 => {
             let p = |i: usize| u8::from_str_radix(&h[i..i + 1].repeat(2), 16).ok();

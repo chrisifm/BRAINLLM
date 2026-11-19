@@ -45,7 +45,7 @@ fn matches(e: &Element, sel: &str) -> bool {
     while !rest.is_empty() {
         let c = rest.as_bytes()[0];
         if c == b'[' {
-            let end = rest.find(']').unwrap_or(rest.len() - 1);
+            let Some(end) = rest.find(']') else { return false; };
             let inner = &rest[1..end];
             let (name, val) = match inner.split_once('=') {
                 Some((n, v)) => (n.trim(), Some(v.trim().trim_matches(['"', '\'']))),
@@ -63,6 +63,7 @@ fn matches(e: &Element, sel: &str) -> bool {
             rest = &rest[end + 1..];
             continue;
         }
+        if !matches!(c, b'.' | b'#') { return false; }
         let end = rest[1..].find(['.', '#', '[']).map(|i| i + 1).unwrap_or(rest.len());
         let word = &rest[1..end];
         let ok = match c {

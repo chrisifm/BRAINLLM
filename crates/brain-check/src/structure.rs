@@ -85,8 +85,8 @@ fn blocks(src: &str, protected: &[Span]) -> Vec<(Block, usize, usize)> {
             let end = i + if head.trim_end().ends_with("/>") {head_end} else {rest.find(close).map(|e| e + close.len()).unwrap_or(rest.len())};
             out.push((kind, i, end));
             i = end;
-        } else if (b[i] as char).is_whitespace() {
-            i += 1;
+        } else if rest.chars().next().is_some_and(char::is_whitespace) {
+            i += rest.chars().next().unwrap().len_utf8();
         } else if let Some(len) = brain_parse::raw_element_len(rest) {
             // `<code raw>…</code>`: a code sample, never blocks of this file.
             if out.last().is_none_or(|(k, _, _)| *k != Block::Markup) {
@@ -98,7 +98,8 @@ fn blocks(src: &str, protected: &[Span]) -> Vec<(Block, usize, usize)> {
                 out.push((Block::Markup, i, i));
             }
             // Up to the next tag that could start another block.
-            let next = rest[1..].find('<').map(|e| e + 1).unwrap_or(rest.len());
+            let first = rest.chars().next().unwrap().len_utf8();
+            let next = rest[first..].find('<').map(|e| e + first).unwrap_or(rest.len());
             i += next;
         }
     }

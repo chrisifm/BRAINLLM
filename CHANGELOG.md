@@ -9,6 +9,20 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+### Fixed
+
+- Local HTTP framing origins now validate the complete authority before entering the CSP, rejecting paths,
+  malformed ports and policy delimiters through the existing B0796 diagnostic.
+- The checker preserves UTF-8 boundaries in block ordering, rejects non-ASCII hex colors without a panic, and
+  returns an ordinary error for incomplete split selectors while retaining valid Unicode selector values.
+- The Node server revalidates unhashed public files and Markdown twins after deployments, matching static-host
+  cache policy, and preserves the negotiated encoding on compressed conditional responses.
+
+### Internal
+
+- Verification now audits reachable Git history, checks the documentation index and runs focused production-cache
+  regressions in a separate GitHub Actions job before the longer suites finish.
+
 ## [0.10.30] - 2026-11-19
 
 ### Fixed

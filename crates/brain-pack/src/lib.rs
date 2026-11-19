@@ -358,6 +358,9 @@ pub fn frame_ancestor_problem(source: &str) -> Option<&'static str> {
     if source == "'self'" || source == "'none'" { return None; }
     if source.starts_with("wss://") || source.starts_with("ws://") { return Some("an embedding page is a document, so its scheme must be https or http"); }
     if let Some(rest) = source.strip_prefix("http://") {
+        // Validate the whole authority before allowing a local HTTP origin. Looking only at the prefix
+        // would accept paths, invalid ports or delimiters that alter the emitted security policy.
+        if let Some(problem) = connect_source_problem(&format!("https://{}", rest.to_ascii_lowercase())) { return Some(problem); }
         let host = rest.split(['/', ':']).next().unwrap_or("");
         let local = matches!(host, "localhost" | "127.0.0.1" | "[::1]") || (!host.is_empty() && !host.contains('.') && host.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
         if !local { return Some("plain http is only for localhost, 127.0.0.1 or a single-label LAN host"); }
