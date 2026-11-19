@@ -2,7 +2,7 @@
 //! - `public/` assets that HTML or CSS reference are copied into `/_b/<hash>.<ext>` and their references rewritten
 //!   (immutable); the rest of `public/` is copied as is.
 //! - `_headers` (static hosts) and `_brain/nginx.conf`: `/_b/*` immutable, HTML and `sw.js` `no-cache`, unhashed
-//!   `public/` files `max-age=3600, stale-while-revalidate=86400`, `Vary: Accept-Encoding`.
+//!   `public/` files `no-cache`, `Vary: Accept-Encoding`.
 //! - `sw.js`: `self.BRAIN_BUILD = {…}` (build hash, precache list, offline page) + RUNTIME's `brain-sw.js`; with
 //!   `sw: false` a worker that deletes its caches and unregisters itself, so the opt-out reaches past visitors.
 //! - The registration snippet before `</body>` of every page: after `load`, in idle time, HTTPS or localhost only.

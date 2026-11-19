@@ -2041,7 +2041,7 @@ export function createServer(o = {}) {
     if (path === null) return false
     const md = file(mdPath(path))
     if (!md) return false
-    send(res, 200, req.method === 'HEAD' ? '' : readFileSync(md), { 'content-type': MIME['.md'], 'cache-control': 'public, max-age=3600', vary: 'accept', ...twinCanonical(path) })
+    send(res, 200, req.method === 'HEAD' ? '' : readFileSync(md), { 'content-type': MIME['.md'], 'cache-control': 'no-cache', vary: 'accept', ...twinCanonical(path) })
     return true
   }
   // A Markdown copy repeats its page: the header names the canonical the page itself declares. A page without one (no
@@ -2082,8 +2082,8 @@ export function createServer(o = {}) {
       const headers = {
         ...(ext === '.md' ? twinCanonical(p) : {}),
         'content-type': type,
-        // the worker script must be revalidated on every check, or a CDN could keep an old worker for an hour (§35.7)
-        'cache-control': p.startsWith('/_b/') ? 'public, max-age=31536000, immutable' : p === '/sw.js' || /\.(m3u8?|mpd)$/i.test(p) ? 'no-cache' : 'public, max-age=3600',
+        // Unhashed files can change at the same URL on deploy, just like static-host output (§35.7).
+        'cache-control': p.startsWith('/_b/') ? 'public, max-age=31536000, immutable' : 'no-cache',
         vary: 'accept-encoding',
       }
       // the smallest precompressed sibling the client accepts (the build keeps only those smaller than the file)
@@ -2099,6 +2099,7 @@ export function createServer(o = {}) {
         const stat = await handle.stat()
         if (!stat.isFile()) throw new Error('Static output must be a regular file')
         headers.etag = await fileTag(handle, stat)
+        if (best) headers['content-encoding'] = best.enc
         if (res.destroyed) return true
         if (!best) headers['accept-ranges'] = 'bytes'
         const inm = req.headers['if-none-match']
@@ -2110,7 +2111,6 @@ export function createServer(o = {}) {
           headers['content-length'] = String(span.end - span.start + 1)
         } else {
           headers['content-length'] = String(stat.size)
-          if (best) headers['content-encoding'] = best.enc
         }
         await streamFile(req, res, handle, span ? 206 : 200, headers, span)
       } finally {
