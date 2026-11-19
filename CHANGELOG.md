@@ -9,6 +9,12 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+### Fixed
+
+- Small persisted stores flush without the debounce delay and save pending changes on page exit and subtree disposal.
+- Development health probes accept canonical paths while preserving authored public files and page routes.
+- Private sidecar requests preserve multiline JSON contexts and plural dictionaries within one protocol frame.
+
 ## [0.10.31] - 2026-11-19
 
 ### Fixed

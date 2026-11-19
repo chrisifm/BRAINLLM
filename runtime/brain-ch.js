@@ -117,7 +117,8 @@ export function store(init, o = {}, id) {
       else if (r) localStorage.removeItem(P) // another shape: the old data is discarded, never applied
     } catch {}
     const base = JSON.stringify(snap()) // the state as created: changes made before the module loads are still saved
-    READY.push(import('./brain-persist.js').then(m => m.persist({ key: P, v, big, apply, snap, S, base })))
+    const owner = I.owner()
+    READY.push(import('./brain-persist.js').then(m => m.persist({ key: P, v, big, apply, snap, S, base, owner })))
   }
   let onStorage = null
   if (o.sync === 'storage' && G.localStorage) {

@@ -1,0 +1,15 @@
+{
+  "id": "persist-lifecycle",
+  "kind": "fix",
+  "title": "Save small persisted state before leaving the page",
+  "why": "A debounce could lose recent changes on reload; subtree disposal also releases the persistence listeners.",
+  "changelog": [
+    "Small persisted stores flush"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "apis": [],
+  "affects": [
+    "**/*.brain",
+    "channels/**"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "id": "sidecar-json-frames",
+  "kind": "fix",
+  "title": "Keep formatted JSON in one private invocation frame",
+  "why": "Multiline contexts and plural dictionary objects could split a request across the line-delimited protocol.",
+  "changelog": [
+    "Private sidecar requests preserve"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "apis": [],
+  "affects": [
+    "**/*.jsbrain",
+    "locales/**"
+  ]
+}
