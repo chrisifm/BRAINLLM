@@ -9,6 +9,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.10.31] - 2026-11-19
+
 ### Fixed
 
 - Local HTTP framing origins now validate the complete authority before entering the CSP, rejecting paths,
@@ -1662,7 +1664,8 @@ These checkout snapshots are not release-binary performance benchmarks.
 - First public npm release for seven native platforms (macOS arm64/x64, Linux x64/arm64/musl, Windows x64/arm64),
   the runtime and the `npm create @christianirack/brainllm` and `npm create @christianirack/brainll` initializers (#5).
 
-[Unreleased]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.3...HEAD
+[Unreleased]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.31...HEAD
+[0.10.31]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.30...v0.10.31
 [0.10.3]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.0...v0.10.1
