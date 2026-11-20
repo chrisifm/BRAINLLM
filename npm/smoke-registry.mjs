@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url'
 import { request } from 'node:http'
 
 const REGISTRY = 'https://registry.npmjs.org/'
+const REGISTRY_ATTEMPTS = 8
 const OUTPUT = 2 * 1024 * 1024
 const NPM_CODES=new Set(['E404','E401','E403','E400','E429','E500','E502','E503','EUSAGE','EBADENGINE','EBADPLATFORM','ETARGET','EINTEGRITY','EAI_AGAIN','ETIMEDOUT','ECONNRESET','ECONNREFUSED','ENOTFOUND','ENOENT','EACCES','EPERM'])
 const DOCTOR_REPORTS=new WeakMap()
@@ -239,6 +240,12 @@ export function httpProbe(url) {
     req.once('timeout', () => req.destroy()); req.once('error', () => resolveProbe(false)); req.end()
   })
 }
+export function exactRegistryVersion(stdout, version) {
+  const result = JSON.parse(stdout)
+  // npm can return either a single value or a singleton list for an exact package spec.
+  return result === version || (Array.isArray(result) && result.length === 1 && result[0] === version)
+}
+
 export async function smoke(config) {
   const browser=config.browser===undefined?null:browserExecutable(config.browser)
   const root = mkdtempSync(join(tmpdir(), 'brain-registry-smoke-'))
@@ -263,12 +270,34 @@ export async function smoke(config) {
     }
     monitor = setInterval(() => { try { diskBound(root) } catch { exhausted = true; for (const job of active) job.stop('disk-limit') } }, 2000)
     for (const pkg of ['brainllm', 'create-brainllm', 'create-brainll']) {
-      let available = false, lastError=null
-      for (let attempt = 0; attempt < 5 && !available; attempt++) {
-        try { const result = await run([npm, 'view', `@christianirack/${pkg}@${config.version}`, 'version', '--json'], root, `registry-${pkg}-${attempt}`, 30000); available = JSON.parse(result.stdout) === config.version; if(!available){lastError=Error('Registry version response mismatch');lastError.detail={phase,reason:'registry-version-response-mismatch',exitCode:result.code}} } catch(error) {lastError=error; if(error instanceof SyntaxError)lastError.detail={phase,reason:'registry-invalid-json'}}
-        if (!available) { remaining(); await new Promise(resolveDelay => setTimeout(resolveDelay, Math.min(1000 * 2 ** attempt, remaining()))) }
+      let available = false, lastError
+      for (let attempt = 0; attempt < REGISTRY_ATTEMPTS; attempt++) {
+        try {
+          const result = await run(
+            [npm, 'view', `@christianirack/${pkg}@${config.version}`, 'version', '--json', '--prefer-online'],
+            root, `registry-${pkg}-${attempt}`, 30000,
+          )
+          available = exactRegistryVersion(result.stdout, config.version)
+          if (available) break
+          lastError = Error('Registry version response mismatch')
+          lastError.detail = { phase, reason: 'registry-version-response-mismatch', exitCode: result.code }
+        } catch (error) {
+          lastError = error
+          if (error instanceof SyntaxError) lastError.detail = { phase, reason: 'registry-invalid-json' }
+        }
+        if (attempt + 1 < REGISTRY_ATTEMPTS) {
+          const delay = Math.min(1000 * 2 ** attempt, 20000, remaining())
+          await new Promise(resolveDelay => setTimeout(resolveDelay, delay))
+        }
       }
-      if (!available) {const error=Error('Exact published version is not visible anonymously');error.detail={...lastError?.detail,phase,reason:'exact-version-unavailable',lastAttemptReason:lastError?.detail?.reason,retryAttempts:5};throw error}
+      if (!available) {
+        const error = Error('Exact published version is not visible anonymously')
+        error.detail = {
+          ...lastError?.detail, phase, reason: 'exact-version-unavailable',
+          lastAttemptReason: lastError?.detail?.reason, retryAttempts: REGISTRY_ATTEMPTS,
+        }
+        throw error
+      }
     }
     const checks = []
     for (const [initializer, name] of [['brainllm', 'registry-long'], ['brainll', 'registry-short']]) {

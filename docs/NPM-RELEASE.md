@@ -71,6 +71,9 @@ packing, requesting OIDC or inheriting npm credentials. Both initializers must c
 check, production build, doctor and an actual development HTTP response. Windows currently reports browser testing
 as unsupported; do not describe that result as a successful CDP or accessibility execution.
 
+The checker accepts an exact version as a JSON string or a singleton array from npm. Each lookup requests fresh
+metadata, with bounded backoff for registry propagation. The exact package and installed version checks still apply.
+
 The checker owns its home, npm configuration, cache, browser profile and temporary listeners. Linux CI explicitly
 selects a disposable browser wrapper, matching the source-verification runner setup; this does not alter consumers'
 browser security configuration. Failure artifacts contain only an allowlisted structured summary, never raw doctor

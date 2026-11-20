@@ -20,6 +20,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Internal
 
+- Published-package verification accepts both exact-version JSON response shapes from npm and retries fresh
+  registry lookups within a bounded propagation window.
+
 - Verification now audits reachable Git history, checks the documentation index and runs focused production-cache
   regressions in a separate GitHub Actions job before the longer suites finish.
 
