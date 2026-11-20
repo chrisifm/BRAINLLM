@@ -792,8 +792,12 @@ fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
         "/@brain/test.html" => {
             // tests read the default language's texts, like the page at `/` (t() would otherwise return the key)
             let mut pre = ctx.head_prepend.clone();
+            let mut document = TEST_HTML.to_string();
             if let Some((def, _)) = brain_pack::read_i18n(&ctx.root)
             {
+                // t() and fmt read <html lang> (and data-default-lang for the fallback): a fixed `en` made a Spanish-only
+                // app's tests print the raw key and format 4.5 as "4.5" instead of "4,5"
+                document = test_document(&document, &def);
                 let dict = brain_pack::read_dict(&ctx.root, &def)
                     .iter()
                     .map(|(k, v)| format!("{}:{v}", json_str(k)))
@@ -801,7 +805,7 @@ fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
                     .join(",");
                 pre.push_str(&format!("<script type=\"module\">import{{add}}from'/@brain/brain-i18n.js';add({},{{{dict}}});</script>", json_str(&def)));
             }
-            let html = prepend_head(TEST_HTML, &pre);
+            let html = prepend_head(&document, &pre);
             return http::respond(&mut s, 200, http::mime("x.html"), html.as_bytes(), head);
         }
         "/@brain/test-api.js" => {
@@ -2047,6 +2051,12 @@ fn split_locale(i18n: &Option<(String, Vec<String>)>, path: &str) -> (Option<Str
 }
 
 /// A locale's dictionary as a JSON object (i18n/<locale>.json, values kept as written).
+/// The test harness document in the app's default language, so `t()` and `fmt` read it as the page at `/` does.
+fn test_document(html: &str, default: &str) -> String {
+    let lang = html_escape(default);
+    html.replacen("<html lang=\"en\">", &format!("<html lang=\"{lang}\" data-default-lang=\"{lang}\">"), 1)
+}
+
 fn dict_json(root: &Path, locale: &str) -> String {
     let body = brain_pack::read_dict(root, locale)
         .iter()
@@ -2984,6 +2994,12 @@ fn on_change(ctx: &Ctx, path: &Path) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_test_harness_speaks_the_default_language() {
+        let html = super::test_document(super::TEST_HTML, "es");
+        assert!(html.contains("<html lang=\"es\" data-default-lang=\"es\">"), "{html}");
+        assert!(!html.contains("lang=\"en\""));
+    }
     struct WatchFixture(PathBuf);
     impl WatchFixture {
         fn new() -> Self {

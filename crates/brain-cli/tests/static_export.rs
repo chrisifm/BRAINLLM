@@ -27,6 +27,9 @@ fn static_starter_exports_complete_pages_and_fails_closed_before_changing_dist()
     assert!(!incompatible.status.success()); assert!(!tmp.0.join("bad").exists());
     ok(&tmp.0, &["new", "site", "--static", "--json"]);
     let app = tmp.0.join("site");
+    // The starter itself checks clean: its layout once used a token that does not exist (B0302 `--border`).
+    let check = String::from_utf8_lossy(&run(&app, &["check", "--json"]).stdout).into_owned();
+    assert!(!check.contains("B0302"), "static starter must use only tokens.cssbrain names: {check}");
     assert!(!app.join("server").exists());
     assert!(!app.join("views/account/_guard.jsbrain").exists());
     assert!(!fs::read_to_string(app.join(".brain_env")).unwrap().contains("BRAIN_SECRET"));

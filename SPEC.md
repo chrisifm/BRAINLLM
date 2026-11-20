@@ -90,7 +90,7 @@ Signals are plain variables: `n++`, `items = [...items, x]`. Never mutate in pla
 | `drv(() => e)` | derived, read-only |
 | `fx(() => { …; return cleanup })` | side effect; return cleanup for listeners/timers. It runs while the script executes: declare what it reads above it (B0134; a nested listener and a `watch` callback without `immediate` run later and may read what is declared below). Page-wide keys (Esc, ⌘Z with focus on `body`): `fx(() => { addEventListener('keydown', onKey); return () => removeEventListener('keydown', onKey) })` |
 | `export async function load(ctx)` | views only, runs on server; result arrives as `props`. `throw notFound()` → 404 with `views/404.brain`; `throw gone()` → 410 (removed for good; `views/410.brain`, else the 404 view); `throw redirect('/x')` → 303, `redirect('/new-slug', 301)` for a moved record |
-| `emit('ev', data?)` | event to parent (`on:ev` on the parent) |
+| `emit('ev', data?)` | event to parent: calls its `on:ev={(data) => …}` with `data` as the first argument (no event object, no `e.detail`) |
 | `ref()` + `bind:ref={r}` | DOM node access (never `document`/`window`) |
 | `log(...)` | dev log, removed in build |
 | `provide(K, v)` · `use(K)` · `key('name')` | context; `K` exported from channels/ |

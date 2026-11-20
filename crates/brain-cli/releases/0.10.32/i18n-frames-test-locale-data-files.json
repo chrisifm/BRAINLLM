@@ -1,0 +1,17 @@
+{
+  "id": "i18n-frames-test-locale-data-files",
+  "kind": "fix",
+  "title": "Multiline plural dictionaries, test-page language, replaceable data files and the static starter token",
+  "why": "A static catalog app hit four defects: dev SEO failed on multiline plural entries, brain test ignored the default language, built data JSON was baked into a hashed copy, and the static starter failed brain check.",
+  "changelog": [
+    "plural entries span several lines",
+    "renders components in the app's default language",
+    "keep their path in builds and get no hashed copy",
+    "uses the `--line` token instead of the nonexistent `--border`"
+  ],
+  "guide": "SPEC.md",
+  "apis": [],
+  "affects": [
+    "**/*.brain"
+  ]
+}

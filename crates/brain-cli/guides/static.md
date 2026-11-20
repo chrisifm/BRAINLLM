@@ -95,7 +95,9 @@ Keep the normal output by omitting `staticOutput`. To choose generated folders a
 workers and complete versioned SDK trees; packages retain relative asset relationships inside that tree. Images
 places hashed image copies in that folder and generated social cards below its og/ subfolder. Other generated
 assets include imported binaries and fonts. Raw public JS/CSS keep their authored directory so relative imports and
-CSS URLs still work; they use revalidation rather than an unsafe relocated immutable copy. Original public/ files keep their authored paths for external links
+CSS URLs still work; they use revalidation rather than an unsafe relocated immutable copy. Data files (`.json`,
+`.csv`, `.xml`, `.txt`) also keep their path and get no hashed copy: `api('/data/books.json')` reads the deployed file,
+so replacing it needs no rebuild. Original public/ files keep their authored paths for external links
 and streaming playlists: place them in public/img/ or public/src/ when those stable URLs are desired.
 Directories are relative URL-safe paths; `.` means the export root. Traversal, reserved paths and output collisions
 fail before writing the artifact. The layout also applies to doctor and MCP builds. References, hashes, SRI,

@@ -9,6 +9,23 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.10.32] - 2026-11-20
+
+### Fixed
+
+- `<meta seo>` and `load()` read dictionaries whose plural entries span several lines: the dictionary sent to the
+  Node sidecar kept those newlines and broke its newline-delimited frame (JSON.parse SyntaxError, the title fell back
+  to the app name in dev).
+- `brain test` renders components in the app's default language: the test page declared `lang="en"`, so a
+  Spanish-only app's `t()` returned the raw key and `fmt.number` used English separators.
+- Data files in `public/` (`.json`, `.csv`, `.xml`, `.txt`) keep their path in builds and get no hashed copy, so
+  `api('/data/books.json')` reads the deployed file and replacing it needs no rebuild, as in `brain run`.
+- The `brain new --static` layout uses the `--line` token instead of the nonexistent `--border` (B0302).
+
+### Documentation
+
+- SPEC states that `emit('ev', data)` calls the parent's `on:ev` handler with `data` as its first argument.
+
 ## [0.10.31] - 2026-11-19
 
 ### Fixed
@@ -1664,7 +1681,8 @@ These checkout snapshots are not release-binary performance benchmarks.
 - First public npm release for seven native platforms (macOS arm64/x64, Linux x64/arm64/musl, Windows x64/arm64),
   the runtime and the `npm create @christianirack/brainllm` and `npm create @christianirack/brainll` initializers (#5).
 
-[Unreleased]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.31...HEAD
+[Unreleased]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.32...HEAD
+[0.10.32]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.31...v0.10.32
 [0.10.31]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.30...v0.10.31
 [0.10.3]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.1...v0.10.2

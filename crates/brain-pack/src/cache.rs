@@ -562,9 +562,11 @@ fn hashed_url_with_layout(path: &str, bytes: &[u8], layout: &crate::asset_layout
 
 // Raw public modules/styles and streaming manifests resolve dependencies relative to their own URL.
 // Preserve their authored location; compiler-owned graph resources already rewrite their imports before hashing.
+/// Data files (`api('/data/books.json')`, a CSV, an XML feed) stay at their own path: a hashed copy baked the data into
+/// the build, so replacing the file needed a rebuild (dev serves it live), and the unused copy doubled its bytes in dist.
 fn hashable_public(path: &str) -> bool {
     if path.trim_start_matches('/') == "brain-build.json" { return false; }
-    !matches!(path.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str(), "m3u8" | "m3u" | "mpd" | "js" | "mjs" | "css")
+    !matches!(path.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str(), "m3u8" | "m3u" | "mpd" | "js" | "mjs" | "css" | "json" | "geojson" | "ndjson" | "csv" | "tsv" | "xml" | "txt")
 }
 
 /// Every relocatable `public/` file → its immutable URL.

@@ -467,6 +467,24 @@ fn json_value_end(src: &str, at: usize) -> Option<usize> {
 
 /// `i18n/<locale>.json` → (key, raw JSON value) for every top-level entry, in file order (§37: flat dotted keys;
 /// a value is a string or a plural object).
+/// Drops whitespace outside strings: a plural `{one, other}` written over several lines kept its newlines, and the
+/// load/seo sidecar frames are newline-delimited, so the frame broke right after the `{` (JSON.parse SyntaxError).
+fn compact_json(value: &str) -> String {
+    let (mut out, mut quoted, mut escaped) = (String::with_capacity(value.len()), false, false);
+    for c in value.chars() {
+        if quoted {
+            out.push(c);
+            if escaped { escaped = false } else if c == '\\' { escaped = true } else if c == '"' { quoted = false }
+        } else if c == '"' {
+            quoted = true;
+            out.push(c);
+        } else if !c.is_whitespace() {
+            out.push(c);
+        }
+    }
+    out
+}
+
 pub fn read_dict(root: &Path, locale: &str) -> Vec<(String, String)> {
     let Ok(src) = std::fs::read_to_string(root.join("i18n").join(format!("{locale}.json"))) else { return vec![] };
     let mut out = Vec::new();
@@ -480,7 +498,7 @@ pub fn read_dict(root: &Path, locale: &str) -> Vec<(String, String)> {
                 let Some(colon) = src[ke..].find(':').map(|c| ke + c + 1) else { break };
                 let vs = colon + src[colon..].len() - src[colon..].trim_start().len();
                 let Some(ve) = json_value_end(&src, vs) else { break };
-                out.push((key, src[vs..ve].trim().to_string()));
+                out.push((key, compact_json(src[vs..ve].trim())));
                 i = ve;
             }
             b'}' => break,
@@ -3117,6 +3135,17 @@ fn speculation_rules(public: &[String], zero_js: bool, zero_paths: &[String], cu
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_multiline_plural_entry_reads_as_one_line() {
+        let root = std::env::temp_dir().join(format!("brain-dict-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("i18n")).unwrap();
+        std::fs::write(root.join("i18n/fr.json"), "{\n  \"a.b\": \"Hello\",\n  \"summary.ratings\": {\n    \"one\": \"one  € review\",\n    \"other\": \"{n} € reviews \\\" ok\"\n  }\n}\n").unwrap();
+        let dict = super::read_dict(&root, "fr");
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(dict[0], ("a.b".to_string(), "\"Hello\"".to_string()));
+        assert_eq!(dict[1].1, "{\"one\":\"one  € review\",\"other\":\"{n} € reviews \\\" ok\"}");
+        assert!(dict.iter().all(|(_, v)| !v.contains('\n')), "sidecar frames are newline-delimited");
+    }
     #[test]
     fn locale_links_rewrite_pages_and_leave_the_rest() {
         let t = LocaleLinks { prefix: "/es".into(), routes: vec!["/".into(), "/about".into(), "/posts/:id".into()], slugs: BTreeMap::from([("/contact".to_string(), "/es/contacto".to_string())]) };

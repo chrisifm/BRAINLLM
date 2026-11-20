@@ -1,6 +1,6 @@
 //! #181 (QA #124): a view that reads data while rendering is prerendered in its loading state (the build has no
 //! origin: a real fetch would freeze an error into the page) and mounts on load so the client fetches; `public/`
-//! paths named in JS point at the hashed copy, so the chunk's name changes with the asset.
+//! paths named in JS point at the hashed copy, so the chunk's name changes with the asset; data files keep their path.
 use std::path::{Path, PathBuf};
 
 const DATA: &str = r#"<meta seo title="Data" description="Data page">
@@ -71,5 +71,9 @@ fn data_reads_stay_loading_and_public_paths_are_hashed_in_js() {
     let js_names_raw = out.files.iter().any(|(k, v)| k.ends_with(".js") && (v.contains("\"/og.png\"") || v.contains("=/og.png")));
     assert!(js_names_og && !js_names_raw, "public/ path in JS not rewritten");
     assert!(out.binary.contains_key(og.trim_start_matches('/')) && out.binary.contains_key("og.png"));
+    // a data file stays replaceable after the build: its literal path is kept and no hashed copy is emitted
+    let data = brain_pack::cache::hashed_url("/data.json", b"{\"n\":42}");
+    assert!(out.files.iter().any(|(k, v)| k.ends_with(".js") && v.contains("/data.json")), "the fetch must keep /data.json");
+    assert!(!out.binary.contains_key(data.trim_start_matches('/')) && out.binary.contains_key("data.json"), "data must not be hashed");
     let _ = std::fs::remove_dir_all(&root);
 }
