@@ -7,7 +7,8 @@
     "plural entries span several lines",
     "renders components in the app's default language",
     "keep their path in builds and get no hashed copy",
-    "uses the `--line` token instead of the nonexistent `--border`"
+    "uses the `--line` token instead of the nonexistent `--border`",
+    "calls the parent's `on:ev` handler"
   ],
   "guide": "SPEC.md",
   "apis": [],

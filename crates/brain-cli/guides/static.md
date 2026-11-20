@@ -78,9 +78,7 @@ flag newer sources or incomplete analysis, but does not compile or prove source/
 - Treating 404.html or a redirect file as a universal hosting API: verify the provider's status and routing behavior.
 
 ## Customize the build
-
 Keep the normal output by omitting `staticOutput`. To choose generated folders and separate stylesheets:
-
 ```json
 {
   "output": "static",
@@ -114,7 +112,6 @@ Use existing settings alongside the layout: `base` for hosting below a URL prefi
 public origin, `seo` for canonical/trailing-slash policy and metadata, and `cache` for HTTP/SW/offline policies.
 
 ## Discovery for assistants and search
-
 The standard export includes llms.txt (page index) and llms-full.txt (readable page text), robots.txt, sitemap.xml,
 feeds and Markdown copies. They are generated from the real routes and rendered content, including custom layouts.
 The LLM discovery files are enabled by default (`seo.llms` and `seo.llmsFull`); do not hand-maintain duplicate lists.
