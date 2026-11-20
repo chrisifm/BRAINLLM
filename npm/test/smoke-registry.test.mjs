@@ -5,7 +5,18 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
-import { anonymousEnvironment, options, npmCli, childSession, httpProbe, publicFailure, logSummary, doctorSummary, browserExecutable, browserFailure } from '../smoke-registry.mjs'
+import { exactRegistryVersion, anonymousEnvironment, options, npmCli, childSession, httpProbe, publicFailure, logSummary, doctorSummary, browserExecutable, browserFailure } from '../smoke-registry.mjs'
+
+test('exact npm version lookup accepts scalar and singleton responses only', () => {
+  const version = '0.10.31'
+  for (const result of [version, [version]]) {
+    assert.equal(exactRegistryVersion(JSON.stringify(result), version), true)
+  }
+  for (const result of ['0.10.30', ['0.10.30'], [], [version, '0.10.30'], { version }, null]) {
+    assert.equal(exactRegistryVersion(JSON.stringify(result), version), false)
+  }
+  assert.throws(() => exactRegistryVersion('', version), SyntaxError)
+})
 
 test('registry smoke requires an exact version and a bounded deadline without running npm', () => {
   assert.equal(options(['--help']).help, true)
