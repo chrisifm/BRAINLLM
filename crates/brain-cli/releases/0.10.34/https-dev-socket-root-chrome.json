@@ -1,0 +1,16 @@
+{
+  "id": "https-dev-socket-root-chrome",
+  "kind": "fix",
+  "title": "Dev hot-reload socket behind HTTPS proxies and headless Chrome as root",
+  "why": "An app served by brain run behind an HTTPS nginx proxy rendered a blank page, and brain test failed inside a root container because Chromium refused to start its sandbox.",
+  "changelog": [
+    "opens its hot-reload socket",
+    "`--no-sandbox` when the effective user is root",
+    "runs in the project root under `brain run`"
+  ],
+  "guide": "SPEC.md",
+  "apis": [],
+  "affects": [
+    "**/*.brain"
+  ]
+}

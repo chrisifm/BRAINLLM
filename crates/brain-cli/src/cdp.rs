@@ -147,8 +147,10 @@ impl Chrome {
             "--use-mock-keychain",
             "--password-store=basic",
         ])
-        .arg(format!("--user-data-dir={}", profile.0.display()))
-        .arg("about:blank")
+        .arg(format!("--user-data-dir={}", profile.0.display()));
+        // Chromium refuses to start its sandbox as root (containers, CI images) and closes the pipe at once
+        if unsafe { libc::geteuid() } == 0 { cmd.arg("--no-sandbox"); }
+        cmd.arg("about:blank")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());

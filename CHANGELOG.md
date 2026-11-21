@@ -9,6 +9,19 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.10.34] - 2026-11-21
+
+### Fixed
+
+- `brain run` behind an HTTPS reverse proxy no longer leaves a blank page: the dev client opens its hot-reload socket
+  with `wss:` on https pages, and a blocked socket only disables hot reload instead of stopping the page module.
+- `brain test` and `brain doctor` start headless Chrome as root (containers, CI images): the launcher adds
+  `--no-sandbox` when the effective user is root, which Chromium requires there.
+
+### Documentation
+
+- `brain guide data` notes that `load()` runs in the project root under `brain run` and in dist/ under `brain start`.
+
 ## [0.10.33] - 2026-11-20
 
 0.10.32 failed CI before publishing; its changes ship here.
@@ -1683,7 +1696,8 @@ These checkout snapshots are not release-binary performance benchmarks.
 - First public npm release for seven native platforms (macOS arm64/x64, Linux x64/arm64/musl, Windows x64/arm64),
   the runtime and the `npm create @christianirack/brainllm` and `npm create @christianirack/brainll` initializers (#5).
 
-[Unreleased]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.33...HEAD
+[Unreleased]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.34...HEAD
+[0.10.34]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.33...v0.10.34
 [0.10.33]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.31...v0.10.33
 [0.10.31]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.30...v0.10.31
 [0.10.3]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.2...v0.10.3

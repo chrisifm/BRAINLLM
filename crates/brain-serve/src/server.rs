@@ -2994,6 +2994,16 @@ fn on_change(ctx: &Ctx, path: &Path) {
 
 #[cfg(test)]
 mod tests {
+    /// Behind an HTTPS proxy a `ws:` socket is mixed content: the constructor throws and, uncaught, the page module
+    /// (and its `route()`) never loads, leaving a blank page.
+    #[test]
+    fn the_hmr_client_follows_the_page_scheme_and_survives_a_blocked_socket() {
+        let js = super::CLIENT_JS;
+        assert!(js.contains("location.protocol === 'https:' ? 'wss' : 'ws'"), "HMR URL must use wss: on https pages");
+        assert!(!js.contains("`ws://${location.host}"), "hard-coded ws: scheme is back");
+        assert!(js.contains("try { ws = new WebSocket(url); } catch"), "a blocked socket must not abort the client module");
+    }
+
     #[test]
     fn the_test_harness_speaks_the_default_language() {
         let html = super::test_document(super::TEST_HTML, "es");

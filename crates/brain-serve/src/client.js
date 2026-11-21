@@ -4,7 +4,8 @@
 import { attach as traceAttach, ids as traceIds, inspected as traceInspected, lastFailed as traceFailed } from './brain-trace.js';
 // brain.json `base` (#148): every dev URL lives under it (`<meta name="brain-base" content="/app/">`)
 const base = (document.querySelector('meta[name="brain-base"]')?.content ?? '/').replace(/\/$/, '');
-const url = `ws://${location.host}${base}/@brain/hmr`;
+// wss: behind an HTTPS proxy; ws: from an https page is mixed content and the constructor throws
+const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${base}/@brain/hmr`;
 let box;
 // Timing to measure HMR latency (QA, bench/sites/hmr.mjs): epoch ms, same base as Date.now().
 const now = () => performance.timeOrigin + performance.now();
@@ -118,7 +119,8 @@ function swapCss(path, receivedAt) {
   }
 }
 function connect() {
-  ws = new WebSocket(url);
+  // a blocked socket only loses hot reload: the page module (and route()) must still load
+  try { ws = new WebSocket(url); } catch (e) { ws = null; console.warn('brain:hmr disabled', e); return; }
   ws.onopen = () => { while (pending.length) ws.send(pending.shift()); };
   traceAttach(batch => ws?.readyState === 1 && (ws.send(batch), true));
   ws.onmessage = e => {

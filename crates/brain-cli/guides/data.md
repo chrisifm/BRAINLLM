@@ -26,6 +26,7 @@ state. Pick the first row that fits:
    Optimistic: `todos.post(x, { optimistic: () => … })` rolls back on failure.
 5. **Server-rendered data.** In the view: `export async function load(ctx) { return { user: await db.get(ctx.params.id) } }`;
    the result arrives as `props`. Start independent awaits together (`Promise.all`) to avoid B1106.
+   `brain run` starts it in the project root and `brain start` in dist/: never read files through `process.cwd()`.
 6. **Shared state.** `brain add channel cart --store "{items:[]}"` → `provide(Cart, store({ items: [] }))` in the
    subtree root, `use(Cart)` below. `store`/`bus` exist only in `channels/` (B0806).
 7. **App-wide HTTP policy** (optional, in `app.brain`): `<meta http base="/api" timeout="10s" retry="2" login="/login">`.
