@@ -151,7 +151,7 @@ test('a faq group inside a child component of a page rendered per request gets i
   const r = await fetch(base + '/faq')
   assert.equal(r.status, 200)
   const html = await r.text()
-  const block = /<script type="application\/ld\+json">([^<]*FAQPage[^<]*)<\/script>/.exec(html)
+  const block = /<script\b[^>]*type="application\/ld\+json"[^>]*>([^<]*FAQPage[^<]*)<\/script>/.exec(html)
   assert.ok(block, html)
   const data = JSON.parse(block[1])
   assert.equal(data.mainEntity[0].name, 'Is it free?')
