@@ -9,6 +9,14 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.10.44] - 2026-11-22
+
+### Fixed
+
+- `brain check` reports B0139 when a loop variable named `t` or `fmt` hides the function its block calls
+  (`{#each items as t}` around `{t('key')}`, which `brain add locale` can write into an existing loop): the call
+  reached the item and failed at run time with «t is not a function» while check stayed silent.
+
 ## [0.10.43] - 2026-11-22
 
 ### Fixed

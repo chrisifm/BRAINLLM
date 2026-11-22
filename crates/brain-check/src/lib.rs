@@ -924,6 +924,24 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// B0139 for a loop variable: `{#each items as t}` around `{t('key')}` (what `brain add locale` writes into an
+    /// existing loop) calls the item instead of the translation function → «t is not a function» at run time.
+    fn each_hides_primitive(&mut self, b: &EachBlock) {
+        let mut names: Vec<&Ident> = Vec::new();
+        b.item.bound_names(&mut names);
+        names.extend(b.index.iter());
+        let mut used = String::new();
+        node_exprs(&b.body, &mut used);
+        for id in names.into_iter().filter(|id| matches!(id.name.as_str(), "t" | "fmt")) {
+            let called = used.match_indices(&format!("{}(", id.name)).any(|(at, _)| {
+                !used[..at].chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '$' || c == '.')
+            });
+            if called {
+                self.push("B0139", id.span, format!("this loop variable `{0}` hides the `{0}()` function inside the block: `{0}(…)` there calls the item and fails at run time", id.name), format!("rename the loop variable (for example `{0}Item`) and its uses in the block", id.name));
+            }
+        }
+    }
+
     fn stmt(&mut self, s: &Stmt) {
         match s {
             Stmt::Var(v) => {
@@ -1989,6 +2007,7 @@ impl<'a> Checker<'a> {
                 if let Some(i) = &b.index {
                     self.scopes.declare(&i.name, Kind::EachItem);
                 }
+                self.each_hides_primitive(b);
                 match &b.key {
                     Some(k) => self.expr(k),
                     None => {

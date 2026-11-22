@@ -1,0 +1,15 @@
+{
+  "id": "loop-variable-hides-t",
+  "kind": "fix",
+  "title": "brain check reports a loop variable that hides t() or fmt()",
+  "why": "After brain add locale, {#each items as t} around {t('key')} called the item and failed at run time while brain check reported nothing.",
+  "changelog": [
+    "reports B0139 when a loop variable named `t` or `fmt` hides the function its block calls"
+  ],
+  "guide": "SPEC.md",
+  "apis": [],
+  "affects": [
+    "**/*.brain"
+  ],
+  "codes": ["B0139"]
+}

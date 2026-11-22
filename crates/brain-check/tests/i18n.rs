@@ -296,3 +296,15 @@ fn framework_english_covers_every_runtime_message_key() {
     let missing: Vec<&String> = keys.iter().filter(|k| !have.contains(&k.as_str())).collect();
     assert!(keys.len() >= 25 && missing.is_empty(), "missing English for {missing:?}");
 }
+
+#[test]
+fn a_loop_variable_named_t_around_t_calls_is_reported() {
+    // what `brain add locale` writes into an existing `{#each … as t}`: `t('…')` would call the item at run time
+    let root = app("each-t", &["en", "es"], &[("i18n/en.json", EN), ("i18n/es.json", ES)]);
+    let src = "<script>\nimport { sig } from 'brain'\nlet items = sig([])\n</script>\n<meta seo title=\"T\" description=\"D\">\n<ul>{#each items as t (t.id)}<li>{t.name} <b>{t('nav.home')}</b></li>{/each}</ul>";
+    let ds = check(&root, "views/list.brain", src);
+    assert!(ds.iter().any(|d| d.code == "B0139" && d.msg.contains("loop variable `t`")), "{ds:#?}");
+    // a loop variable `t` that never calls t() is fine
+    let ok = "<script>\nimport { sig } from 'brain'\nlet items = sig([])\n</script>\n<meta seo title=\"T\" description=\"D\">\n<ul>{#each items as t (t.id)}<li>{t.name}</li>{/each}</ul>";
+    assert!(!check(&root, "views/ok.brain", ok).iter().any(|d| d.code == "B0139"));
+}
