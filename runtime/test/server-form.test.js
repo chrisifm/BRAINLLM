@@ -123,7 +123,7 @@ test('#173 SSR: a failing component renders its fallback inside a 200 page; the 
   assert.equal(r.status, 200)
   const h = await r.text()
   assert.match(h, /<p class="ok">still here<\/p>/)
-  assert.match(h, /class="brain-fallback">This section could not load\./)
+  assert.match(h, /class="brain-fallback" data-rid="req-42">This section could not load\. <small class="brain-ref">req-42<\/small>/)
   const l = logs.find(l => l.msg === 'component failed during SSR')
   assert.equal(l.rid, 'req-42')
   assert.equal(l.comp, 'comp/widget.brain')

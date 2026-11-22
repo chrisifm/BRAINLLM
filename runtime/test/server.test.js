@@ -123,7 +123,7 @@ test('SSR: params + query reach load, the view renders, props are embedded safel
   assert.ok(!h.includes('content="default"'))
   assert.match(h, /<link rel="canonical" href="\/users\/7">/)
   assert.match(h, /<meta property="og:title" content="User Ada&lt;b&gt;">/)
-  assert.match(h, /application\/ld\+json">\{"@type":"Person","name":"Ada\\u003cb>\\u003c\/script>"\}/)
+  assert.match(h, /application\/ld\+json">\{"@context":"https:\/\/schema.org","@type":"Person","name":"Ada\\u003cb>\\u003c\/script>"\}/)
   const nonce = r.headers.get('content-security-policy').match(/'nonce-([^']+)'/)[1]
   assert.equal((h.match(new RegExp(`<script nonce="${nonce.replace(/[+/=]/g, '\\$&')}"`, 'g')) || []).length, 3)
   assert.equal(r.headers.get('x-content-type-options'), 'nosniff')
