@@ -361,9 +361,12 @@ pub fn frame_ancestor_problem(source: &str) -> Option<&'static str> {
         // Validate the whole authority before allowing a local HTTP origin. Looking only at the prefix
         // would accept paths, invalid ports or delimiters that alter the emitted security policy.
         if let Some(problem) = connect_source_problem(&format!("https://{}", rest.to_ascii_lowercase())) { return Some(problem); }
-        let host = rest.split(['/', ':']).next().unwrap_or("");
-        let local = matches!(host, "localhost" | "127.0.0.1" | "[::1]") || (!host.is_empty() && !host.contains('.') && host.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
-        if !local { return Some("plain http is only for localhost, 127.0.0.1 or a single-label LAN host"); }
+        let host = rest.split(['/', ':']).next().unwrap_or("").to_ascii_lowercase();
+        let label = |l: &str| !l.is_empty() && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+        // `<name>.localhost` is loopback (RFC 6761) and a secure context in browsers, like localhost itself
+        let loopback_name = host.strip_suffix(".localhost").is_some_and(|names| names.split('.').all(label));
+        let local = matches!(host.as_str(), "localhost" | "127.0.0.1" | "[::1]") || loopback_name || (!host.contains('.') && label(&host));
+        if !local { return Some("plain http is only for localhost, <name>.localhost, 127.0.0.1 or a single-label LAN host"); }
         if rest.contains('*') && !rest.starts_with("localhost:*") && !rest.starts_with("127.0.0.1:*") { return Some("only a localhost port may be a wildcard"); }
         return None;
     }

@@ -2345,3 +2345,18 @@ fn paths_another_server_answers_are_not_checked_as_build_output() {
         assert!(Config::from_json(&brain_lex::Json::parse(bad).unwrap()).is_err(), "{bad}");
     }
 }
+
+#[test]
+fn a_page_now_rendered_per_request_is_not_reported_as_removed() {
+    let dir = fresh_dir("redir-ssr");
+    std::fs::create_dir_all(dir.join("dist")).unwrap();
+    std::fs::write(dir.join("dist/sitemap.xml"), "<urlset><url><loc>https://acme.dev/plans</loc></url><url><loc>https://acme.dev/items/7</loc></url></urlset>").unwrap();
+    let c = cfg();
+    let mut pages = good_site();
+    let routes = vec!["/plans".to_string(), "/items/:id".to_string()];
+    let built = finish(&c, &dir, &mut pages, &routes, &[]).unwrap();
+    let removed: Vec<&String> = built.warnings.iter().filter(|w| w.starts_with("B1826")).collect();
+    assert!(!removed.iter().any(|w| w.contains("`/plans`")), "{removed:?}");
+    // a pattern does not prove one URL still answers
+    assert!(removed.iter().any(|w| w.contains("`/items/7`")), "{removed:?}");
+}

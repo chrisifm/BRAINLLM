@@ -564,9 +564,7 @@ pub fn seo_head_with_branding(seo: &[(String, String)], site: Option<&str>, rout
     h.push_str("<meta property=\"og:type\" content=\"website\">");
     // `jsonld={…}` (INTERNALS §32): the object as given, with a default @context
     if let Some(ld) = get("jsonld") {
-        let ld = ld.trim();
-        let ld = if ld.starts_with('{') && !ld.contains("\"@context\"") { format!("{{\"@context\":\"https://schema.org\",{}", &ld[1..]) } else { ld.to_string() };
-        let ld = if ld.ends_with(",}") { ld.replace(",}", "}") } else { ld };
+        let ld = with_context(ld.trim());
         h.push_str(&format!("<script type=\"application/ld+json\">{}</script>", brain_lex::json::in_html(&ld)));
     } else if let Some(schema) = get("schema") {
         // `schema="Article"` (SPEC «SEO»): the page's own values; article types need `headline` (server.mjs head()
@@ -592,6 +590,28 @@ pub fn seo_head_with_branding(seo: &[(String, String)], site: Option<&str>, rout
         h.push_str(&format!("<script type=\"application/ld+json\">{}</script>", brain_lex::json::in_html(&ld)));
     }
     (title, h)
+}
+
+/// `jsonld` as written by the app, with `"@context": "https://schema.org"` first in every top-level node that lacks
+/// one (an object, or each object of an array): without it search engines drop the block. server.mjs `withContext`
+/// does the same for pages rendered per request.
+fn with_context(ld: &str) -> String {
+    use brain_lex::json::Json;
+    fn node(v: Json) -> Json {
+        match v {
+            Json::Obj(kv) if !kv.iter().any(|(k, _)| k == "@context") => {
+                let mut out = vec![("@context".to_string(), Json::str("https://schema.org"))];
+                out.extend(kv);
+                Json::Obj(out)
+            }
+            v => v,
+        }
+    }
+    match Json::parse(ld) {
+        Ok(Json::Arr(items)) => Json::Arr(items.into_iter().map(node).collect()).stringify(),
+        Ok(v @ Json::Obj(_)) => node(v).stringify(),
+        _ => ld.to_string(),
+    }
 }
 
 /// Key of a head tag for deduplication: `name`/`property` of a `<meta>`, `rel`(+`hreflang`) of a `<link>` other than
@@ -752,6 +772,15 @@ mod tests {
         // non-article types keep `name`
         let (_, h) = seo_head(&kv(&[("title", "Tasks"), ("schema", "WebApplication")]), None, "/", "");
         assert!(h.contains(r#""@type":"WebApplication","name":"Tasks""#), "{h}");
+    }
+
+    #[test]
+    fn jsonld_nodes_without_context_get_one() {
+        let kv = |p: &[(&str, &str)]| p.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect::<Vec<_>>();
+        let (_, h) = seo_head(&kv(&[("jsonld", r#"[{"@type":"BreadcrumbList"},{"@context":"https://schema.org","@type":"Product"}]"#)]), None, "/p", "");
+        assert!(h.contains(r#"[{"@context":"https://schema.org","@type":"BreadcrumbList"},{"@context":"https://schema.org","@type":"Product"}]"#), "{h}");
+        let (_, h) = seo_head(&kv(&[("jsonld", r#"{"@context":"https://schema.org","@type":"Room"}"#)]), None, "/p", "");
+        assert_eq!(h.matches("@context").count(), 1, "{h}");
     }
 
     #[test]

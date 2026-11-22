@@ -91,6 +91,13 @@ const { env: ENV } = process // the only source of configuration
 const json = v => JSON.stringify(v)
 // JSON safe inside <script>: no `</script>`, no HTML comment openers, no line separators
 const jsonInHtml = v => json(v ?? null).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
+// `jsonld` as the view wrote it, with `@context` first in every top-level node that lacks one (prerender with_context
+// does the same): without it search engines drop the block
+const withContext = v => {
+  if (typeof v === 'string') try { v = JSON.parse(v) } catch { return v }
+  const node = n => (n && typeof n === 'object' && !Array.isArray(n) && !('@context' in n) ? { '@context': 'https://schema.org', ...n } : n)
+  return Array.isArray(v) ? v.map(node) : node(v)
+}
 const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const b64u = b => Buffer.from(b).toString('base64url')
 const tag = s => createHash('sha1').update(s).digest('base64url').slice(0, 22)
@@ -1124,6 +1131,9 @@ export function createServer(o = {}) {
     }
     return out
   }
+  // Server-function stubs called while a page renders here (an fx, a helper) never leave the process: brain-rpc.js
+  // returns a promise that stays pending, so the call is a no-op instead of fetch() with a relative URL
+  globalThis.__brainServer = true
   const dropRejections = ownRejections(e => {
     const into = globalThis.__brainSSR
     if (into) return void into.push({ e, w: 'promise', comp: null })
@@ -1622,7 +1632,7 @@ export function createServer(o = {}) {
     let body, seo, failed
     try {
       const at = { path: url.pathname, params: params || {}, query: Object.fromEntries(url.searchParams) } // route() (§41.5)
-      ;({ body, seo, failed } = await (queue = queue.then(() => render(route, props, forms, at), () => render(route, props, forms, at))))
+      ;({ body, seo, failed } = await (queue = queue.then(() => render(route, props, forms, at, rid), () => render(route, props, forms, at, rid))))
     } catch (e) {
       log('error', 'render failed', { rid, path: url.pathname, ...trace(e) })
       return failPage(res, 500, rid)
@@ -1736,7 +1746,7 @@ export function createServer(o = {}) {
     }
     if (req.$brainFailedReads) softFailure(req, rid, url, 200)
     try {
-      const { body, failed } = await (queue = queue.then(() => render(route, props, null, at), () => render(route, props, null, at)))
+      const { body, failed } = await (queue = queue.then(() => render(route, props, null, at, rid), () => render(route, props, null, at, rid)))
       for (const f of failed || []) log('error', 'component failed during SSR', { rid, path: url.pathname, comp: f.comp, where: f.w, ...trace(f.e) })
       // the 200 is already out: a page rendered without its data at least stays out of the index
       const stale = req.$brainFailedReads?.temporary ? '<meta name="robots" content="noindex">' : ''
@@ -1757,7 +1767,7 @@ export function createServer(o = {}) {
     if (!route.error) return notice
     try {
       const props = { message: 'Something went wrong.', rid }, at = { path: url.pathname, params: {}, query: {} }
-      return (await (queue = queue.then(() => render(route.error, props, null, at), () => render(route.error, props, null, at)))).body
+      return (await (queue = queue.then(() => render(route.error, props, null, at, rid), () => render(route.error, props, null, at, rid)))).body
     } catch {
       return notice
     }
@@ -1776,7 +1786,7 @@ export function createServer(o = {}) {
     if (wantsHtml(req) && route.error) return ssr(req, res, route.error, params, url, rid, null, status, { message: 'Something went wrong.', rid })
     return failPage(res, status, rid)
   }
-  async function render(route, props, forms, at = null) {
+  async function render(route, props, forms, at = null, rid = null) {
     const { install } = await load('_server/dom.js')
     const doc = install()
     const root = doc.createElement('div')
@@ -1810,6 +1820,7 @@ export function createServer(o = {}) {
     globalThis.__brainRoute = at // route(): app path, params, query of this request
     globalThis.__brainBase = BASE !== '/' ? BASE : null // computed href/src get the base (brain.js attr)
     const failed = (globalThis.__brainSSR = []) // components that fell back (brain-guard, §42): logged by ssr()
+    globalThis.__brainRid = rid // a boundary's fallback names this request, so a user report finds the log line
     let stop
     // #285: with `adopt` in the manifest (codegen navigates with fc/nx), the HTML is stamped so islands resume on it
     const unstamp = mf.adopt && core._rt ? (await load('_server/brain-hydrate.js')).stamp(core._rt()) : null
@@ -1821,6 +1832,7 @@ export function createServer(o = {}) {
     }
     await new Promise(r => setTimeout(r, 0))
     globalThis.__brainSSR = null
+    globalThis.__brainRid = null
     fillValues(root)
     const body = localizeLinks(route, root.innerHTML)
     stop()
@@ -3032,7 +3044,7 @@ function head(page, seo, path, search = '', route, base = '') {
       const tag = `<link rel="canonical" href="${esc(url)}">`
       h = /<link[^>]*rel=["']canonical["'][^>]*>/i.test(h) ? h.replace(/<link[^>]*rel=["']canonical["'][^>]*>/i, () => tag) : h.replace('</head>', () => tag + '</head>')
       if (seo['og:url'] == null) meta('property', 'og:url', url) // og:url follows the canonical unless the view sets its own
-    } else if (k === 'jsonld') h = h.replace('</head>', () => `<script type="application/ld+json">${jsonInHtml(v)}</script></head>`)
+    } else if (k === 'jsonld') h = h.replace('</head>', () => `<script type="application/ld+json">${jsonInHtml(withContext(v))}</script></head>`)
     else if (/^(og|twitter|article):/.test(k)) meta(k.startsWith('twitter:') ? 'name' : 'property', k, v)
     else if (typeof v === 'string') meta('name', k, v)
   }

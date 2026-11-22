@@ -9,6 +9,23 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.10.37] - 2026-11-22
+
+### Fixed
+
+- `<meta seo jsonld={…}>` adds `"@context": "https://schema.org"` to every top-level node that lacks one, for an
+  object or an array, on prerendered pages and on pages rendered per request; search engines dropped those blocks.
+- A server function called from an `fx` (directly or through a helper) while the page renders on the server is a
+  no-op: the call stays pending instead of running `fetch()` with a relative URL.
+- A component boundary's fallback rendered on the server names the request: `data-rid`, the error's code in
+  `data-code`, and the request id in small text, so a user report finds the server log line.
+- `brain run` no longer reloads the page for writes under `.gitignore` globs (`qa-shots/*.png`, `*.log`,
+  `**/playwright-report`); a glob never hides `.brain`, `.jsbrain` or `.cssbrain` source.
+- `throw notFound()` from `load()` under `brain run` renders `views/404.brain` (and 410) inside its layouts, as
+  `brain start` does.
+- B1826 no longer reports a page as removed when the server now renders it per request (a literal server route).
+- `csp.frameAncestors` accepts `http://<name>.localhost` origins (loopback, RFC 6761).
+
 ## [0.10.36] - 2026-11-21
 
 0.10.35 failed CI before publishing; its changes ship here.

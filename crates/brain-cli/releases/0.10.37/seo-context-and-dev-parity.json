@@ -1,0 +1,23 @@
+{
+  "id": "seo-context-and-dev-parity",
+  "kind": "fix",
+  "title": "JSON-LD gets its @context, server rendering skips server calls, and dev matches production",
+  "why": "Google dropped JSON-LD blocks written without @context, an fx calling a server function during server rendering ran fetch() with a relative URL, a fallback could not be matched to its log line, and brain run reloaded on ignored writes and rendered the 404 page without its layouts.",
+  "changelog": [
+    "adds `\"@context\": \"https://schema.org\"`",
+    "is a no-op: the call stays pending",
+    "names the request: `data-rid`",
+    "under `.gitignore` globs",
+    "inside its layouts, as",
+    "B1826 no longer reports a page as removed",
+    "accepts `http://<name>.localhost` origins"
+  ],
+  "guide": "SPEC.md",
+  "apis": [],
+  "affects": [
+    "**/*.brain",
+    "brain.json",
+    ".gitignore"
+  ],
+  "codes": []
+}

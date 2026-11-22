@@ -459,7 +459,7 @@
             "type": "string",
             "pattern": "^('self'|'none'|https://[a-z0-9.-]+(:[0-9]+)?|http://(localhost|127\\.0\\.0\\.1)(:([0-9]+|\\*))?|http://[a-z0-9-]+(:[0-9]+)?)$"
           },
-          "description": "Who may embed this site's pages in an iframe (CSP frame-ancestors). Absent: 'none' plus X-Frame-Options DENY. With origins, X-Frame-Options is omitted (SAMEORIGIN when the list is only 'self'). http only for localhost or a single-label LAN host."
+          "description": "Who may embed this site's pages in an iframe (CSP frame-ancestors). Absent: 'none' plus X-Frame-Options DENY. With origins, X-Frame-Options is omitted (SAMEORIGIN when the list is only 'self'). http only for localhost, <name>.localhost or a single-label LAN host."
         },
         "formAction": {
           "type": "array",

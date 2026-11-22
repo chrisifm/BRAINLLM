@@ -958,7 +958,11 @@ pub fn finish_with_og(
         &cfg.site,
         std::fs::read_to_string(root.join("dist/sitemap.xml")),
     ) {
-        for (old, to) in redirects::removed(&prev, site, &page_routes, &rules) {
+        // a page the server renders per request (`/` once its view needs load() data) is still published: only its
+        // HTML file is gone. Literal server routes count; a pattern (`/posts/:slug`) does not prove one URL exists
+        let served: Vec<String> = routes.iter().filter(|r| !r.contains([':', '*', '['])).cloned().collect();
+        let published: Vec<String> = page_routes.iter().chain(served.iter()).cloned().collect();
+        for (old, to) in redirects::removed(&prev, site, &published, &rules) {
             let suggestion = to.map_or(
                 "{ \"from\": \"".to_string() + &old + "\", \"to\": \"/…\" }",
                 |t| format!("{{ \"from\": \"{old}\", \"to\": \"{t}\" }}"),

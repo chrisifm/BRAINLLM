@@ -1431,7 +1431,8 @@ made immutable by a directory-wide rule. SRI, preloads and route ledgers resolve
 
 **Metadata (COMPILER + TOOLCHAIN + RUNTIME)**
 - `<meta seo>` attributes accept expressions over `props` (the `load` result); `jsonld={obj}` serializes to
-  `<script type="application/ld+json">` (escaped `</`), and `schema="Article"` stays a shortcut: one node of that
+  `<script type="application/ld+json">` (escaped `</`; every top-level node without `@context` gets
+  `https://schema.org` first: prerender `with_context`, server.mjs `withContext`), and `schema="Article"` stays a shortcut: one node of that
   type from the page's title (`headline` for article types, else `name`), description, canonical, `og:image` and
   `lastmod`, written by prerender `seo_head` and, for SSR pages, by server.mjs `head()`, which replaces the template's
   node; never a `<meta name="schema">` (fixed 2026-10-29). `app.brain`'s

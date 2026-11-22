@@ -12,6 +12,7 @@ fn local_frame_ancestors_reject_paths_ports_and_policy_delimiters() {
         "http://localhost:*; script-src 'unsafe-inline'", "http://localhost:*/path",
         "http://intranet:80; script-src 'unsafe-inline'",
         "http://intranet:*", "http://*.example.com", "http://example.com",
+        "http://lab.localhost:*", "http://.localhost", "http://a..localhost", "http://lab.localhost.example.com",
     ] {
         assert!(frame_ancestor_problem(source).is_some(), "accepted {source:?}");
     }
@@ -23,6 +24,7 @@ fn exact_framing_origins_and_existing_loopback_wildcard_ports_remain_valid() {
         "'self'", "'none'", "https://embed.example.com", "https://embed.example.com:8443",
         "http://localhost", "http://localhost:8080", "http://localhost:*",
         "http://127.0.0.1", "http://127.0.0.1:*", "http://intranet:8080", "http://INTRANET:8080",
+        "http://lab.localhost", "http://lab.localhost:4300", "http://a.b.localhost", "http://LAB.localhost",
     ] {
         assert_eq!(frame_ancestor_problem(source), None, "{source}");
     }

@@ -1908,9 +1908,18 @@ fn fixed_view(ctx: &Ctx, view: &str, props: &str, title: &str, detail: &str) -> 
             html_escape(detail)
         );
     }
+    // views/404.brain and 410.brain keep the layouts of the not-found route, as production's 404 page does: a
+    // `notFound()` from load() in a dynamic route looks the same under `brain run` as under `brain start`
+    let layouts: Vec<String> = if matches!(view, "views/404.brain" | "views/410.brain") {
+        brain_pack::routes::discover(&ctx.root).into_iter().find(|d| d.path == "*").map(|d| d.layouts).unwrap_or_default()
+            .iter().map(|l| json_str(&format!("/{l}"))).collect()
+    } else {
+        Vec::new()
+    };
     let data = format!(
-        "{{\"v\":{},\"l\":[],\"p\":{props}}}",
-        json_str(&format!("/{view}"))
+        "{{\"v\":{},\"l\":[{}],\"p\":{props}}}",
+        json_str(&format!("/{view}")),
+        layouts.join(",")
     );
     let data = brain_lex::json::in_html(&data);
     format!(
@@ -2734,16 +2743,47 @@ static GITIGNORED: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new()
 fn gitignore_entries(root: &Path) -> &'static [String] {
     GITIGNORED.get_or_init(|| {
         std::fs::read_to_string(root.join(".gitignore")).unwrap_or_default().lines().map(str::trim)
-            .filter(|l| !l.is_empty() && !l.starts_with(['#', '!']) && !l.contains(['*', '?', '[']))
+            .filter(|l| !l.is_empty() && !l.starts_with(['#', '!']) && !l.contains('['))
             .map(|l| l.trim_start_matches('/').trim_end_matches('/').to_string())
             .filter(|l| !l.is_empty() && l != ".brain_env" && !l.ends_with(".brain") && l != "brain.json").collect()
     })
 }
 
 fn ignored_in(root: &Path, rel: &Path) -> bool {
-    ignored(rel) || gitignore_entries(root).iter().any(|entry| {
-        if entry.contains('/') { rel.starts_with(entry) } else { rel.components().any(|c| c.as_os_str() == entry.as_str()) }
-    })
+    ignored(rel) || gitignore_entries(root).iter().any(|entry| gitignored(entry, rel))
+}
+
+/// One `.gitignore` entry against an app-relative path. Plain entries name a folder or file (anywhere, or from the root
+/// when they contain `/`); `*`, `?` and `**` globs (`qa-shots/*.png`, `*.log`) follow git: `*` stays inside one segment.
+/// A glob never hides app source (.brain, .jsbrain, .cssbrain): only what tools write next to it.
+fn gitignored(entry: &str, rel: &Path) -> bool {
+    let path = rel.to_string_lossy().replace('\\', "/");
+    if !entry.contains(['*', '?']) {
+        return if entry.contains('/') { rel.starts_with(entry) } else { rel.components().any(|c| c.as_os_str() == entry) };
+    }
+    if [".brain", ".jsbrain", ".cssbrain"].iter().any(|ext| path.ends_with(ext)) {
+        return false;
+    }
+    let segments: Vec<&str> = path.split('/').collect();
+    if entry.contains('/') {
+        // the path itself or one of its folders
+        (1..=segments.len()).any(|n| glob(entry.as_bytes(), segments[..n].join("/").as_bytes()))
+    } else {
+        segments.iter().any(|s| glob(entry.as_bytes(), s.as_bytes()))
+    }
+}
+
+fn glob(p: &[u8], t: &[u8]) -> bool {
+    match p.first() {
+        None => t.is_empty(),
+        Some(b'*') if p.get(1) == Some(&b'*') => {
+            let rest = if p.get(2) == Some(&b'/') { &p[3..] } else { &p[2..] };
+            (0..=t.len()).any(|i| glob(rest, &t[i..]))
+        }
+        Some(b'*') => (0..=t.len()).take_while(|&i| i == 0 || t[i - 1] != b'/').any(|i| glob(&p[1..], &t[i..])),
+        Some(b'?') => t.first().is_some_and(|&c| c != b'/') && glob(&p[1..], &t[1..]),
+        Some(&c) => t.first() == Some(&c) && glob(&p[1..], &t[1..]),
+    }
 }
 
 fn ignored(rel: &Path) -> bool {
@@ -3174,6 +3214,18 @@ mod tests {
         super::push_metric(&mut m, 1_000 + super::METRICS_MS + 1, "late".into());
         assert_eq!(m.len(), 1, "older than the window is dropped");
     }
+    #[test]
+    fn gitignore_globs_skip_tool_output_but_never_app_source() {
+        use std::path::Path;
+        for (entry, path) in [("qa-shots/*.png", "qa-shots/f4.png"), ("*.png", "e2e/out/a.png"), ("test-results", "test-results/x/trace.zip"), ("**/playwright-report", "e2e/playwright-report/index.html"), ("/output-*", "output-1/a.json")] {
+            let entry = entry.trim_start_matches('/');
+            assert!(super::gitignored(entry, Path::new(path)), "{entry} {path}");
+        }
+        for (entry, path) in [("qa-shots/*.png", "qa-shots/sub/f4.png"), ("*.png", "views/home.brain"), ("views/*", "views/home.brain"), ("*.log", "server/log.jsbrain"), ("qa-*", "views/qa.brain")] {
+            assert!(!super::gitignored(entry, Path::new(path)), "{entry} {path}");
+        }
+    }
+
     #[test]
     fn the_watcher_skips_what_the_framework_writes_but_not_app_files() {
         use std::path::Path;
@@ -3691,6 +3743,33 @@ mod admission_tests {
         assert_eq!(super::titled(&root, "Oops"), "Oops");
         std::fs::write(root.join("app.brain"), "<meta seo titleTemplate=\"%s · Site\">\n<slot />\n").unwrap();
         assert_eq!(super::titled(&root, "Oops"), "Oops · Site");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_not_found_page_from_load_keeps_its_layouts_as_in_production() {
+        let root = std::env::temp_dir().join(format!("brain-dev-404-layout-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for f in ["views/_layout.brain", "views/404.brain", "views/items/[id].brain", "views/items/_error.brain"] {
+            let p = root.join(f);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, "<p></p>").unwrap();
+        }
+        let root = root.canonicalize().unwrap();
+        let compiler: CompileFn = Arc::new(|src, _| {
+            Ok(Compiled { server: Default::default(), js: String::new(), css: String::new(), deps: vec![], server_js: src.into() })
+        });
+        let opts = Options {
+            root: root.clone(), host: "127.0.0.1".into(), port: 0, head_prepend: String::new(),
+            runtime: vec![], env: None, base: "/".into(), diagnose: None, problems: None, upstream: None, mock: None,
+        };
+        let dev = start_dev(opts, compiler, false, None).unwrap();
+        let page = super::fixed_view(&dev.ctx, "views/404.brain", "{}", "Not found", "/items/9");
+        assert!(page.contains(r#""v":"/views/404.brain","l":["/views/_layout.brain"]"#), "{page}");
+        // other fixed views keep their own shape
+        let page = super::fixed_view(&dev.ctx, "views/items/_error.brain", "{}", "Oops", "/items/9");
+        assert!(page.contains(r#""l":[]"#), "{page}");
+        drop(dev);
         let _ = std::fs::remove_dir_all(&root);
     }
 
