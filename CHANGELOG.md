@@ -9,6 +9,16 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.10.43] - 2026-11-22
+
+### Fixed
+
+- B2102 no longer reports loading and input hints (`fetchpriority`, `loading`, `decoding`, `enterkeyhint`,
+  `inputmode`, `autocapitalize`) as outside the browser target: a browser that does not know one ignores it, so a
+  feature test or `@supports` cannot apply, and the compiler adds `fetchpriority` to images itself.
+- `redirects.json` that is not a list now shows the rule format (`[{ "from": "/old", "to": "/new" }]`) and points
+  paths answered by another server on this origin to `seo.external`.
+
 ## [0.10.42] - 2026-11-22
 
 ### Fixed

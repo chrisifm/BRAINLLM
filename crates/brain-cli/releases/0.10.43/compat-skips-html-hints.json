@@ -1,0 +1,16 @@
+{
+  "id": "compat-skips-html-hints",
+  "kind": "fix",
+  "title": "Browser-target check no longer reports HTML loading and input hints",
+  "why": "brain check warned about fetchpriority on images, which the compiler adds itself, and suggested a feature test that cannot apply to an attribute browsers simply ignore.",
+  "changelog": [
+    "B2102 no longer reports loading and input hints",
+    "that is not a list now shows the rule format"
+  ],
+  "guide": "SPEC.md",
+  "apis": [],
+  "affects": [
+    "**/*.brain"
+  ],
+  "codes": ["B2102"]
+}

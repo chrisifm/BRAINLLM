@@ -77,7 +77,7 @@ pub fn parse(src: &str) -> Result<Vec<Rule>, Problem> {
     let Json::Arr(items) = j else {
         return Err((
             "redirects.json must be an array".into(),
-            "wrap the rules in [ … ]".into(),
+            "write a list of rules: [{ \"from\": \"/old\", \"to\": \"/new\" }]; for paths another server answers on this origin, use seo.external in brain.json instead".into(),
         ));
     };
     let mut out = Vec::new();

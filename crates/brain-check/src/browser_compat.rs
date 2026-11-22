@@ -362,6 +362,9 @@ impl Facts {
             .any(|(s, keys)| s.start <= span.start && s.end >= span.end && keys.contains(key))
     }
 }
+/// HTML attributes that only hint (priority, lazy loading, decoding, virtual keyboard): ignoring them changes nothing a
+/// user depends on, so they are never reported as outside the browser target.
+const HINTS: &[&str] = &["fetchpriority", "loading", "decoding", "enterkeyhint", "inputmode", "autocapitalize"];
 struct Analyzer<'a> {
     c: &'a Component,
     target: Target,
@@ -463,6 +466,11 @@ impl Analyzer<'_> {
                 Node::Element(e) => {
                     self.feature(data::HTML_ELEMENTS, &e.tag, e.span, "B2102");
                     for attr in &e.attrs {
+                        // Loading and input hints: a browser that does not know one ignores it and the page works the
+                        // same (the compiler itself adds fetchpriority/loading to images). A feature test cannot apply.
+                        if attr.kind == AttrKind::Plain && HINTS.contains(&attr.name.as_str()) {
+                            continue;
+                        }
                         if attr.kind == AttrKind::Plain {
                             self.feature(
                                 data::HTML_ATTRIBUTES,
@@ -740,6 +748,14 @@ mod tests {
     fn shadowed_globals_and_user_members_are_not_guessed() {
         let ds = check_source(
             "<script>function work(Promise) { return Promise.try() } const own = { moveBefore() {} }; own.moveBefore()</script><p>OK</p>",
+            "baseline-widely",
+        );
+        assert!(ds.is_empty(), "{ds:?}");
+    }
+    #[test]
+    fn loading_and_input_hints_are_not_reported() {
+        let ds = check_source(
+            "<img src=\"/a.png\" alt=\"A\" width=\"10\" height=\"10\" fetchpriority=\"high\" decoding=\"async\"><input aria-label=\"Code\" enterkeyhint=\"done\" autocapitalize=\"off\">",
             "baseline-widely",
         );
         assert!(ds.is_empty(), "{ds:?}");
