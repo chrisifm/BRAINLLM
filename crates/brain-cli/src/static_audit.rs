@@ -126,6 +126,8 @@ pub(crate) fn audit_output(root: &Path, dist: &Path) -> Result<Json, String> {
         let url = match r.base.join(r.url.trim()) { Ok(url) => url, Err(_) => { issues.push(issue(&r.file, &r.url, "invalid resource URL")); continue; } };
         if !matches!(url.scheme(), "http" | "https") { continue; }
         if r.external || url.origin() != site.origin() { external.insert(url.origin().ascii_serialization()); continue; }
+        // `seo.external`: a path another server answers on this origin (the API behind nginx) is not in the artifact
+        if config.external.iter().any(|p| url.path().starts_with(p.as_str()) || format!("{}/", url.path()) == *p) { continue; }
         checked += 1;
         // A plain directory host redirects its unslashed mount root to the directory index.
         let path = if url.path() == prefix.trim_end_matches('/') { Some("") } else { url.path().strip_prefix(&prefix) };

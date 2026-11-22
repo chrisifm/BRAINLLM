@@ -147,3 +147,14 @@ fn b1010_points_at_the_split() {
 
     assert!(brain_check::check(&parse("comp/todo.brain", TODO), &Ctx::default()).iter().all(|d| d.code != "B1010"));
 }
+
+#[test]
+fn split_of_a_view_turns_load_props_into_child_props() {
+    let src = "<script>\n  export async function load() { return { steps: [], title: 'T' } }\n</script>\n<main>\n  <section class=\"flow\">\n    <h2>{props.title}</h2>\n    <ul>{#each props.steps as s (s.id)}<li>{s.name}</li>{/each}</ul>\n  </section>\n</main>\n";
+    let c = parse("views/new.brain", src);
+    let s = split::split(&c, "section.flow", "Flow", "comp/flow.brain").unwrap();
+    assert!(!s.extracted.contains("props."), "the child reads its own props: {}", s.extracted);
+    assert!(s.extracted.contains("{title}") && s.extracted.contains("{#each steps as s"), "{}", s.extracted);
+    assert!(s.original.contains("title={props.title}") && s.original.contains("steps={props.steps}"), "{}", s.original);
+    assert_eq!(clean("comp/flow.brain", &s.extracted), Vec::<String>::new());
+}

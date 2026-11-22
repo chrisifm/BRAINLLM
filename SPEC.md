@@ -274,7 +274,7 @@ Public API data offline: `"cache": { "routes": [{ "match": "/api/products/*", "s
 Keep data across visits: `api('/posts', { get: { out: '[Post]', cache: '10m' } })` (never for personal data) ·
 `store(init, { persist: true })`. Heavy work off the main thread: name the module `*.worker.jsbrain`; its exports
 become async functions. Their native bridge bounds pending work, deadlines, bytes and cancellation.
-Public navigable state: `urlState('overview', {key:'tab'})`; selections and native Dialog integrate with query history.
+Public navigable state: `urlState('overview', {key:'tab'})`; selections and native Dialog integrate with query history: a top-level `sig` bound to `<select>`, `<Select>` or `<Tabs>` is kept in the URL as `?ui.<hash>.<name>`; `data-url-state="off"` on that element keeps it private.
 `{key:'tab', values:['overview','details']}` limits it: an unknown query value reads as the first allowed value; `<Tabs>`
 with an unknown value selects its first tab.
 Preserve unrelated query parameters; never serialize credentials or private form input. Use distinct keys in repeated UI.
@@ -450,7 +450,7 @@ Keep existing production routes until their behavior and policies pass a tested 
 `expect(x).toBe(y)|toEqual(y)|toBeTruthy()|toBeFalsy()|toContain(y)` (string or array), each also as `expect(x).not.…` ·
 `await waitFor(fn, { timeout: 3000 }?)` retries `fn` after each render until it neither throws nor returns `false`; use it instead of a fixed sleep.
 A `<meta server>` module cannot be imported by a test (it runs only on the server): test what calls it, with `stub`.
-No server is needed: `stub('save', { ok: true })` answers a `server:` function, `stub('GET /api/posts', [{ id: 1 }])` an endpoint (add `?query` to match it exactly). The answer is a value (200), `reply(422, { errors: { email: 'Taken' } })`, or a function of the call's arguments returning either; `stub()` returns `{ calls }`. It lasts one test, and one never called fails it. `mount`, `click` and `type` wait for stubbed answers.
+No server is needed: `stub('save', { ok: true })` answers a `server:` function, `stub('GET /api/posts', [{ id: 1 }])` an endpoint (add `?query` to match it exactly; under `<meta http base>` the full path also matches). The answer is a value (200), `reply(422, { errors: { email: 'Taken' } })`, or a function of the call's arguments returning either; `stub()` returns `{ calls }`. It lasts one test, and one never called fails it. `mount`, `click` and `type` wait for stubbed answers.
 `brain test` fails on a path that selects no test. It runs beside `brain run`: each uses its own port, and with native sockets, whose port is fixed, tests use the running dev server.
 Before opening the browser or reusing dev, it compiles the selected tests' current local Brain import graph, including
 transitive and automatically discovered components. Current compilation errors stop assertions; unrelated components

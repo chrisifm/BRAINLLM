@@ -56,7 +56,7 @@ fn expression_spans(nodes: &[Node], out: &mut Vec<Span>) {
 }
 
 /// Top-level blocks of a `.brain` source in order of appearance, with their byte offset.
-fn blocks(src: &str, protected: &[Span]) -> Vec<(Block, usize, usize)> {
+fn blocks(src: &str, protected: &[Span], in_meta: &[Span]) -> Vec<(Block, usize, usize)> {
     let mut out = Vec::new();
     let mut i = 0;
     let b = src.as_bytes();
@@ -72,7 +72,7 @@ fn blocks(src: &str, protected: &[Span]) -> Vec<(Block, usize, usize)> {
             continue;
         }
         let tag = |t: &str| rest.starts_with(t) && rest[t.len()..].starts_with(|c: char| c.is_whitespace() || c == '>' || c == '/');
-        let head_end = rest.find('>').map(|e| e + 1).unwrap_or(rest.len());
+        let head_end = rest.match_indices('>').map(|(e, _)| e).find(|e| !in_meta.iter().any(|m| (m.start as usize) <= i + e && i + e < m.end as usize)).map(|e| e + 1).unwrap_or(rest.len());
         let head = &rest[..head_end];
         // HTML `<meta charset|name>` and `<script src|type>` inside `app.brain`'s `<head>` are markup.
         let brain_meta = tag("<meta") && !head.contains("charset") && !head.contains("name=") && !head.contains("http-equiv") && !head.contains("property=");
@@ -179,7 +179,9 @@ impl Checker<'_> {
         expression_spans(&c.template, &mut protected);
         expression_spans(&c.head, &mut protected);
         protected.sort_by_key(|span| (span.start, span.end));
-        let found = blocks(src, &protected);
+        // `<meta seo jsonld={{ … => … }}>`: a `>` inside a meta expression does not close the tag
+        let in_meta: Vec<Span> = c.meta.iter().filter_map(|m| m.expr.as_ref()).map(|e| e.span()).collect();
+        let found = blocks(src, &protected, &in_meta);
         let mut max = Block::Meta;
         for (k, at, _) in &found {
             if *k < max {

@@ -1475,6 +1475,10 @@ pub fn audit(site: &Site) -> Report {
             let Some((path, frag)) = anchor_internal(cfg, &p.route, a) else {
                 continue;
             };
+            // a path another server answers on this origin (`seo.external`, e.g. the API behind nginx)
+            if cfg.external.iter().any(|prefix| path.starts_with(prefix.as_str()) || format!("{path}/") == *prefix) {
+                continue;
+            }
             let raw_path=internal_raw(cfg,&p.route,&a.href).map(|(path,_)|path).unwrap_or_else(||path.clone());
             let target = if path == norm(&p.route) {
                 Some(doc)

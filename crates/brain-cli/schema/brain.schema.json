@@ -698,6 +698,11 @@
           "type": "boolean",
           "default": true
         },
+        "external": {
+          "type": "array",
+          "description": "Path prefixes another server answers on this origin (an API behind nginx). Links under them are not checked against the build.",
+          "items": { "type": "string", "pattern": "^/[^/\\s][^\\s]*$" }
+        },
         "manifest": {
           "type": "boolean",
           "default": true

@@ -47,7 +47,10 @@ globalThis.fetch = async (input, init = {}) => {
   const raw = typeof input === 'string' ? input : input.url ?? String(input);
   const url = new URL(raw, location.href), method = (init.method || input.method || 'GET').toUpperCase();
   const rpc = /^(?:.*\/)?_r\/[^/]+\/([^/]+)$/.exec(url.pathname);
-  const hit = stubs.find(s => (s.fn ? rpc && rpc[1] === s.fn : s.method === method && (s.path.includes('?') ? url.pathname + url.search : url.pathname) === s.path));
+  // a component under test may request `/x.json` where the page sends `/data/x.json` (`<meta http base="/data">`):
+  // a stub written with the full path matches both, the base being whole leading segments
+  const same = (seen, path) => seen === path || (seen.startsWith('/') && path.endsWith(seen) && path.length > seen.length);
+  const hit = stubs.find(s => (s.fn ? rpc && rpc[1] === s.fn : s.method === method && same(s.path.includes('?') ? url.pathname + url.search : url.pathname, s.path)));
   if (!hit) return realFetch(input, init);
   const body = jsonBody(init);
   hit.record.calls.push(body);

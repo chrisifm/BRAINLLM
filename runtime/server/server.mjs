@@ -1022,6 +1022,37 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession, r
   }
 }
 
+// FAQPage for a page rendered per request (INTERNALS §33): the build reads `<details>` groups marked `faq` from the
+// view's own markup, so a group inside a child component only exists once the page renders. Bounded, text only, and
+// skipped when the page already declares a FAQPage.
+const FAQ_GROUP = /<([a-z][a-z0-9-]*)\b[^>]*\sfaq(?=[\s=>\/])[^>]*>/i
+const faqText = html => html.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, ' ').trim()
+function faqJsonld(body, page) {
+  if (page.includes('FAQPage')) return ''
+  const open = FAQ_GROUP.exec(body)
+  if (!open) return ''
+  const qs = []
+  for (const m of body.slice(open.index).matchAll(/<details\b[^>]*>\s*<summary\b[^>]*>([\s\S]*?)<\/summary>([\s\S]*?)<\/details>/gi)) {
+    const q = faqText(m[1]).slice(0, 500), a = faqText(m[2]).slice(0, 4000)
+    if (q && a) qs.push({ '@type': 'Question', name: q, acceptedAnswer: { '@type': 'Answer', text: a } })
+    if (qs.length >= 50) break
+  }
+  if (!qs.length) return ''
+  return `<script type="application/ld+json">${jsonInHtml({ '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: qs })}</script>`
+}
+
+// A promise nobody awaited or caught (an async call started inside fx, a handler, a timer) rejects with no owner. Node's
+// default for that is to end the process, which drops every request in flight (nginx 502, curl "empty reply"). Every
+// server created here registers a sink instead: during a render the failure joins that page's component failures; after
+// it, one structured log line. Registered once per process; a closed server removes its sink.
+const rejectionSinks = new Set()
+let rejectionsHooked = false
+const ownRejections = sink => {
+  if (!rejectionsHooked) rejectionsHooked = true, process.on('unhandledRejection', e => { for (const f of rejectionSinks) f(e) })
+  rejectionSinks.add(sink)
+  return () => rejectionSinks.delete(sink)
+}
+
 export function createServer(o = {}) {
   const dist = resolve(o.dist || process.cwd())
   // ctx.env: what the supervisor passed, read-only; the service key stays with ctx.backend.service
@@ -1093,6 +1124,11 @@ export function createServer(o = {}) {
     }
     return out
   }
+  const dropRejections = ownRejections(e => {
+    const into = globalThis.__brainSSR
+    if (into) return void into.push({ e, w: 'promise', comp: null })
+    log('error', 'unhandled rejection', { where: 'promise', fix: 'An async call nobody awaited or caught failed: often a server function or navigate() started inside fx while the page rendered on the server. Await it inside try/catch, or start it from an event handler', ...trace(e) })
+  })
   const mf = readManifest(dist)
   if (mf.sentry && (typeof sentryDSN !== 'string' || !sentryDSN)) throw Error('Sentry is enabled; set private BRAIN_SENTRY_DSN before starting the Node server')
   let sentryTunnel, sentryStopped = false
@@ -1599,8 +1635,10 @@ export function createServer(o = {}) {
     // a page behind a guard passes it only for its visitor: it stays out of the index even when it renders (§33)
     if (route.guards && route.guards.length) res.setHeader('x-robots-tag', NOINDEX)
     // with seo.trailingSlash "ignore" both forms answer: the canonical takes the form the sitemap lists (no slash)
+    const faq = faqJsonld(body, page)
     let out = head(page, seo, SLASH === 'always' || url.pathname === '/' ? url.pathname : url.pathname.replace(/\/+$/, '') || '/', url.search, route, BASE.slice(0, -1))
     // route params for route() in the browser (the client has no route table)
+    if (faq) out = out.replace('</head>', () => faq + '</head>')
     if (params && Object.keys(params).length) out = out.replace('</head>', () => `<meta name="brain-params" content="${esc(JSON.stringify(params))}"></head>`)
     if (forms) out = out.replace('</body>', () => `<script type="application/json" id="brain-forms">${jsonInHtml(forms)}</script></body>`)
     if (res.$capture) return res.$capture(out, keep({ ...extra, ...ctx.session.headers() }), status)
@@ -1703,7 +1741,8 @@ export function createServer(o = {}) {
       // the 200 is already out: a page rendered without its data at least stays out of the index
       const stale = req.$brainFailedReads?.temporary ? '<meta name="robots" content="noindex">' : ''
       const pm = params && Object.keys(params).length ? `<meta name="brain-params" content="${esc(JSON.stringify(params))}">` : ''
-      end(stale + pm + body, props)
+      // the head is already out: a FAQPage found in the render goes in the body (JSON-LD is valid there)
+      end(stale + pm + faqJsonld(body, top) + body, props)
     } catch (e) {
       log('error', 'render failed (streamed)', { rid, path: url.pathname, status: 200, ...trace(e) })
       await fail()
@@ -2357,6 +2396,7 @@ export function createServer(o = {}) {
       return stats
     })()
   }
+  server.once('close', dropRejections)
   return server
 }
 

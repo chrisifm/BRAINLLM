@@ -667,12 +667,47 @@ fn same_origin_target(e: &Expr, known: &HashSet<String>, strict: bool) -> bool {
     if let Some(v) = literal_value(e) {
         return safe_path_start(&v, !strict);
     }
+    if encoded_after_slash(e) {
+        return true;
+    }
     match e.unparen() {
         Expr::Cond { cons, alt, .. } => same_origin_target(cons, known, strict) && same_origin_target(alt, known, strict),
         Expr::Call { callee, .. } => path(callee).is_some_and(|p| known.contains(&p)),
         Expr::Binary { op: "+", left, .. } if url_prefix(left).is_none() => same_origin_target(left, known, true),
         Expr::Template { tag: None, quasis, exprs, .. } if quasis.first().is_some_and(|q| q.is_empty()) => exprs.first().is_some_and(|x| same_origin_target(x, known, true)),
         _ => url_prefix(e).is_some_and(|p| safe_path_start(&p, false)),
+    }
+}
+
+/// `'/' + encodeURIComponent(a) + '/' + …` (or the template form): the first dynamic piece right after the leading `/`
+/// is percent-encoded, so it can never start with `/` or `\` and turn the path into another host.
+fn encoded_after_slash(e: &Expr) -> bool {
+    fn flatten<'a>(e: &'a Expr, out: &mut Vec<&'a Expr>) {
+        match e.unparen() {
+            Expr::Binary { op: "+", left, right, .. } => {
+                flatten(left, out);
+                flatten(right, out);
+            }
+            other => out.push(other),
+        }
+    }
+    let encoded = |x: &Expr| matches!(x.unparen(), Expr::Call { callee, .. } if path(callee).as_deref() == Some("encodeURIComponent"));
+    let starts_well = |p: &str| p.starts_with('/') && !p.starts_with("//") && !p.starts_with("/\\");
+    match e.unparen() {
+        Expr::Template { tag: None, quasis, exprs, .. } => quasis.first().is_some_and(|q| starts_well(q)) && exprs.first().is_some_and(encoded),
+        Expr::Binary { op: "+", .. } => {
+            let mut terms = Vec::new();
+            flatten(e, &mut terms);
+            let mut prefix = String::new();
+            for t in terms {
+                match literal_value(t) {
+                    Some(v) => prefix.push_str(&v),
+                    None => return starts_well(&prefix) && encoded(t),
+                }
+            }
+            false
+        }
+        _ => false,
     }
 }
 

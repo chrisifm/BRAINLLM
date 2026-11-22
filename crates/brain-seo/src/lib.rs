@@ -850,12 +850,15 @@ pub fn finish_with_og(
             .collect(),
         None => vec![(String::new(), entries.clone())],
     };
+    // an llms.txt the app wrote in public/ is the one published: the generated file would replace it
+    let authored = |name: &str| root.join("public").join(name).is_file();
     for (dir, list) in &groups {
-        if cfg.llms && (dir.is_empty() || !list.is_empty()) {
-            files.push((format!("{dir}llms.txt"), files::llms_txt(cfg, list)));
-        }
-        if cfg.llms_full && (dir.is_empty() || !list.is_empty()) {
-            files.push((format!("{dir}llms-full.txt"), files::llms_full(cfg, list)));
+        for (name, on) in [(format!("{dir}llms.txt"), cfg.llms), (format!("{dir}llms-full.txt"), cfg.llms_full)] {
+            if !on || !(dir.is_empty() || !list.is_empty()) || authored(&name) {
+                continue;
+            }
+            let body = if name.ends_with("llms-full.txt") { files::llms_full(cfg, list) } else { files::llms_txt(cfg, list) };
+            files.push((name, body));
         }
     }
     if cfg.markdown {

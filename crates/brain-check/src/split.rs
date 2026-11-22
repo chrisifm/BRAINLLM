@@ -180,6 +180,8 @@ struct Needs {
     elems: BTreeSet<String>,
     /// `props.<f>` fields read.
     prop_fields: Vec<String>,
+    /// Where each `props.<f>` read is: the new component reads its own prop `<f>` there.
+    prop_spans: Vec<(Span, String)>,
 }
 
 struct Ctx<'a> {
@@ -267,9 +269,14 @@ fn read(e: &Expr, inner: &[String], n: &mut Needs) {
         }
     }
     crate::security::expr(e, false, &[], &mut |x, _, _| {
-        if let Expr::Member { obj, prop: MemberProp::Name(p), .. } = x {
-            if matches!(obj.unparen(), Expr::Ident(i) if i.name == "props") && !n.prop_fields.contains(&p.name) {
+        if let Expr::Member { obj, prop: MemberProp::Name(p), span, .. } = x
+            && matches!(obj.unparen(), Expr::Ident(i) if i.name == "props")
+        {
+            if !n.prop_fields.contains(&p.name) {
                 n.prop_fields.push(p.name.clone());
+            }
+            if !n.prop_spans.iter().any(|(s, _)| s.start == span.start) {
+                n.prop_spans.push((*span, p.name.clone()));
             }
         }
     });
@@ -620,10 +627,17 @@ pub fn split(c: &Component, selector: &str, name: &str, new_rel: &str) -> Result
     // New component: markup with handlers rewritten.
     let (s0, s1) = (el.span.start as usize, el.span.end as usize);
     let mut markup = c.src[s0..s1].to_string();
-    let mut hs: Vec<&(Span, String, String, String)> = n.handlers.iter().collect();
-    hs.sort_by_key(|h| std::cmp::Reverse(h.0.start));
-    for (sp, child, _, _) in hs {
-        markup.replace_range(sp.start as usize - s0..sp.end as usize - s0, child);
+    // handler rewrites and `props.f` → `f` (a read inside a rewritten handler goes with the handler), last first
+    let mut rewrites: Vec<(usize, usize, String)> = n.handlers.iter().map(|(sp, child, _, _)| (sp.start as usize, sp.end as usize, child.clone())).collect();
+    for (sp, f) in &n.prop_spans {
+        let (a, b) = (sp.start as usize, sp.end as usize);
+        if a >= s0 && b <= s1 && !n.handlers.iter().any(|(h, _, _, _)| (h.start as usize) <= a && b <= h.end as usize) {
+            rewrites.push((a, b, f.clone()));
+        }
+    }
+    rewrites.sort_by_key(|r| std::cmp::Reverse(r.0));
+    for (a, b, text) in rewrites {
+        markup.replace_range(a - s0..b - s0, &text);
     }
     let markup = dedent(&markup);
 

@@ -496,6 +496,27 @@ impl<'a> Markup<'a> {
                 return Err(self.err(self.span(start, start + 1), "shorthand attribute `{x}` does not exist", "write the full name: `x={x}`"));
             }
             let full = self.read_name().to_string();
+            // `on:submit|preventDefault` (a modifier from another framework): the handler calls it itself
+            if full.is_empty()
+                && r.starts_with('|')
+                && let Some(prev) = out.last()
+                && prev.attr.kind == AttrKind::On
+            {
+                let word: String = r[1..].chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
+                let event = prev.attr.name.clone();
+                let call = match word.as_str() {
+                    "preventDefault" => "e.preventDefault()",
+                    "stopPropagation" => "e.stopPropagation()",
+                    "stopImmediatePropagation" => "e.stopImmediatePropagation()",
+                    _ => "",
+                };
+                let fix = if call.is_empty() {
+                    format!("event modifiers (`|{word}`) do not exist: write the behavior inside the handler, `on:{event}={{(e) => {{ … }}}}`")
+                } else {
+                    format!("event modifiers do not exist: call it in the handler, `on:{event}={{(e) => {{ {call}; … }}}}`")
+                };
+                return Err(self.err(self.span(start, start + 1 + word.len()), &format!("`on:{event}|{word}`: event modifiers do not exist"), &fix));
+            }
             if full.is_empty() {
                 return Err(self.err(self.span(start, start + 1), &format!("unexpected character `{}` in the tag", r.chars().next().unwrap_or(' ')), "write attributes as `name=\"value\"` or `name={expr}`"));
             }

@@ -39,6 +39,8 @@ export function navigate(to, o = {}) {
   const raw = String(to)
   if (/[\\\x00-\x20\x7f]/.test(raw)) throw Error('Invalid navigation target')
   const u = app(raw)
+  // on the server (SSR) there is no page to move: a render never navigates; redirect from load() instead
+  if (!G.location) return
   if (active) return active.go(u, o.replace ? 'replace' : true)
   if (G.__brainDevGo) return G.__brainDevGo(u, o.replace)
   o.replace ? location.replace(u) : location.assign(u)

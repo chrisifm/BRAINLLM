@@ -92,6 +92,12 @@ fn b0710_open_redirect() {
     assert_eq!(codes_in("views/_guard.jsbrain", &guard("'//evil.example/x'"), &Ctx::default()), ["B0710"]);
     let ctx = Ctx { redirect_hosts: vec!["login.example.com".into()], ..Ctx::default() };
     assert!(codes_in("views/_guard.jsbrain", &guard("'https://login.example.com/sso'"), &ctx).is_empty());
+    // a leading `/` followed by an encoded piece cannot become `//host` or `/\host`: a legacy slug → new path 301
+    assert!(codes_in("views/_guard.jsbrain", &guard("'/' + encodeURIComponent(ctx.query.a) + '/' + encodeURIComponent(ctx.query.b)"), &Ctx::default()).is_empty());
+    assert!(codes_in("views/_guard.jsbrain", &guard("`/${encodeURIComponent(ctx.query.a)}/${encodeURIComponent(ctx.query.b)}`"), &Ctx::default()).is_empty());
+    // the raw value right after the slash is still refused, encoded or not further on
+    assert_eq!(codes_in("views/_guard.jsbrain", &guard("'/' + ctx.query.a + '/' + encodeURIComponent(ctx.query.b)"), &Ctx::default()), ["B0710"]);
+    assert_eq!(codes_in("views/_guard.jsbrain", &guard("'//' + encodeURIComponent(ctx.query.a)"), &Ctx::default()), ["B0710"]);
 }
 
 #[test]

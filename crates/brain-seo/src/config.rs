@@ -141,6 +141,9 @@ pub struct Config {
     pub redirect_policy: crate::redirects::Policy,
     /// `seo.focus`: the terms the site wants to be known for, most relevant first.
     pub focus: Vec<String>,
+    /// `seo.external`: path prefixes another server answers on this origin (an API behind nginx, `/api/`). Links
+    /// under them are not checked against what the build produces.
+    pub external: Vec<String>,
 }
 
 impl Default for Config {
@@ -183,6 +186,7 @@ impl Default for Config {
             sections: true,
             redirect_policy: crate::redirects::Policy::default(),
             focus: Vec::new(),
+            external: Vec::new(),
         }
     }
 }
@@ -304,6 +308,13 @@ impl Config {
             c.credit = b(seo, "credit", true)?;
             c.feed = b(seo, "feed", true)?;
             c.sections = b(seo, "sections", true)?;
+            match seo.get("external") {
+                None => {}
+                Some(Json::Arr(a)) if a.iter().all(|t| t.as_str().is_some_and(|t| t.starts_with('/') && !t.starts_with("//") && t.len() > 1 && !t.chars().any(char::is_whitespace))) => {
+                    c.external = a.iter().filter_map(Json::as_str).map(str::to_string).collect();
+                }
+                Some(_) => return Err("brain.json: `seo.external` must be a list of path prefixes another server answers on this origin; fix: \"external\": [\"/api/\"]".into()),
+            }
             match seo.get("focus") {
                 None => {}
                 Some(Json::Arr(a)) if a.iter().all(|t| t.as_str().is_some_and(|t| !t.trim().is_empty())) => {

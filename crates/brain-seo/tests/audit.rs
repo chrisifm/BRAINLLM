@@ -2316,3 +2316,32 @@ fn a_per_request_template_gets_the_website_and_webpage_graph_with_the_route_patt
     // not-found and error templates are not URLs
     assert_eq!(built.server_head.apply(&c, "*", template), template);
 }
+
+#[test]
+fn an_authored_llms_txt_in_public_is_kept() {
+    let dir = fresh_dir("llms-authored");
+    std::fs::create_dir_all(dir.join("public")).unwrap();
+    std::fs::write(dir.join("public/llms.txt"), "# Acme\n> written by hand\n").unwrap();
+    let j = brain_lex::Json::parse(r#"{"site":"https://acme.dev","name":"Acme","lang":"en"}"#).unwrap();
+    let c = Config::from_json(&j).unwrap();
+    let mut pages = good_site();
+    let built = finish(&c, &dir, &mut pages, &[], &[]).unwrap();
+    assert!(!built.files.iter().any(|(p, _)| p == "llms.txt"), "the generated llms.txt would replace public/llms.txt");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn paths_another_server_answers_are_not_checked_as_build_output() {
+    let j = brain_lex::Json::parse(r#"{"site":"https://acme.dev","name":"Acme","lang":"en","seo":{"external":["/api/"]}}"#).unwrap();
+    let c = Config::from_json(&j).unwrap();
+    assert_eq!(c.external, ["/api/"]);
+    let mut pages = good_site();
+    pages[0].html = pages[0].html.replace("</main>", "<a href='https://acme.dev/api/v1/x.json'>API</a><a href='/api'>API root</a><a href='/apis-missing/'>Broken</a></main>");
+    let report = audit(&Site { cfg: &c, pages: &pages, routes: &[], assets: &[], redirects: &[], images: &[], i18n: None });
+    let broken: Vec<_> = report.errors().filter(|(_, finding)| finding.code == "B1819").map(|(_, finding)| finding.msg.clone()).collect();
+    assert_eq!(broken.len(), 1, "{broken:?}");
+    assert!(broken[0].contains("/apis-missing/"), "{broken:?}");
+    for bad in [r#"{"seo":{"external":["api/"]}}"#, r#"{"seo":{"external":["//cdn.example/"]}}"#, r#"{"seo":{"external":"/api/"}}"#] {
+        assert!(Config::from_json(&brain_lex::Json::parse(bad).unwrap()).is_err(), "{bad}");
+    }
+}

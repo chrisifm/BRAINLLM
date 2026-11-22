@@ -22,6 +22,13 @@ export default function Guarded() { return [tpl('<p class="ok">kept</p>')(), Bad
 w('_b/bare.js', `import { tpl, insert } from '/_b/brain.js'
 export default function Bare() { const r = tpl('<p class="b"><!></p>')(); insert(null, () => { throw new TypeError('bare binding exploded') }, r.firstChild); return r }
 `)
+w('_b/late.js', `import { tpl, fx } from '/_b/brain.js'
+export default function Late() { fx(() => { Promise.reject(new TypeError('late rejection')) }); return tpl('<p class="late">kept</p>')() }
+`)
+w('_b/faq.js', `import { tpl } from '/_b/brain.js'
+const Landing = () => tpl('<section faq><h2>FAQ</h2><details><summary>Is it free?</summary><p>Yes, for <b>ten</b> people.</p></details></section>')()
+export default function Faq() { return [tpl('<h1>Home</h1>')(), Landing()] }
+`)
 w('_server/busy.mjs', `export async function load(ctx) {
   if (ctx.query.kind === 'limited') throw Object.assign(new Error('rate limited for now'), { status: 429, retryAfter: 2 })
   if (ctx.query.kind === 'plain') throw { reason: 'private detail' }
@@ -30,7 +37,7 @@ w('_server/busy.mjs', `export async function load(ctx) {
 }`)
 w('_server/pages/page.html', '<!doctype html><html><head><title>Page</title></head><body><div id="brain-view"><!--brain:ssr--></div><script type="application/json" id="brain-props"><!--brain:props--></script></body></html>')
 const route = (path, view) => ({ path, view, layouts: [], server: null, page: '_server/pages/page.html' })
-w('_server/manifest.json', JSON.stringify({ v: 1, build: 'e1', core: '/_b/brain.js', routes: [route('/guarded', '/_b/guarded.js'), route('/bare', '/_b/bare.js'), { ...route('/busy', '/_b/bare.js'), server: '_server/busy.mjs' }] }))
+w('_server/manifest.json', JSON.stringify({ v: 1, build: 'e1', core: '/_b/brain.js', routes: [route('/guarded', '/_b/guarded.js'), route('/bare', '/_b/bare.js'), route('/late', '/_b/late.js'), route('/faq', '/_b/faq.js'), { ...route('/busy', '/_b/bare.js'), server: '_server/busy.mjs' }] }))
 
 const { createServer } = await import('../server/server.mjs')
 const logs = []
@@ -110,4 +117,43 @@ test('load that throws a plain object: the log names the kind of value, never th
   assert.equal(l.thrown, 'object')
   assert.match(l.fix, /non-Error value \(object\)/)
   assert.ok(!JSON.stringify(l).includes('private detail'))
+})
+
+// node:test treats an unhandled rejection in its own process as a test failure, so the server runs in a child process
+test('a promise an fx started and nobody caught: the page still answers and the failure is logged, the process lives', async () => {
+  const { execFileSync } = await import('node:child_process')
+  const serverUrl = new URL('../server/server.mjs', import.meta.url).href
+  const script = `
+    const { createServer } = await import(${JSON.stringify(serverUrl)})
+    const logs = []
+    const server = createServer({ dist: ${JSON.stringify(dist)}, log: (level, msg, x) => logs.push({ level, msg, ...x }) })
+    await new Promise(r => server.listen(0, '127.0.0.1', r))
+    const base = 'http://127.0.0.1:' + server.address().port
+    const r = await fetch(base + '/late')
+    const html = await r.text()
+    await new Promise(done => setTimeout(done, 50))
+    const again = await fetch(base + '/bare')
+    await again.text()
+    server.close()
+    process.stdout.write(JSON.stringify({ status: r.status, kept: html.includes('class="late"'), again: again.status, logs }))
+  `
+  const out = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', timeout: 20000 }))
+  assert.equal(out.status, 200)
+  assert.equal(out.kept, true)
+  assert.equal(out.again, 200)
+  const entry = out.logs.find(l => l.where === 'promise')
+  assert.ok(entry, JSON.stringify(out.logs))
+  assert.equal(entry.errorType, 'TypeError')
+  assert.ok(!JSON.stringify(entry).includes('late rejection'))
+})
+
+test('a faq group inside a child component of a page rendered per request gets its FAQPage', async () => {
+  const r = await fetch(base + '/faq')
+  assert.equal(r.status, 200)
+  const html = await r.text()
+  const block = /<script type="application\/ld\+json">([^<]*FAQPage[^<]*)<\/script>/.exec(html)
+  assert.ok(block, html)
+  const data = JSON.parse(block[1])
+  assert.equal(data.mainEntity[0].name, 'Is it free?')
+  assert.equal(data.mainEntity[0].acceptedAnswer.text, 'Yes, for ten people.')
 })

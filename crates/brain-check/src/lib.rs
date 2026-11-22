@@ -688,6 +688,7 @@ impl<'a> Checker<'a> {
         }
         let c = self.c;
         self.read_before_declared(&c.script);
+        self.fx_runs_on_server(&c.script);
         for s in &c.script {
             // Top-level declarations initialised with a primitive are the legal place for sig/drv/ref.
             let module_var = match s {
@@ -877,6 +878,7 @@ impl<'a> Checker<'a> {
     }
 
     fn block(&mut self, body: &[Stmt]) {
+        self.block_declarations(body);
         self.scopes.push();
         let mut m = HashMap::new();
         for s in body {
@@ -891,6 +893,35 @@ impl<'a> Checker<'a> {
             self.stmt(s);
         }
         self.scopes.pop();
+    }
+
+    /// B0138: the same `let`/`const`/`function` name twice in one block is a SyntaxError in the emitted module: the
+    /// whole file fails to load (a view's server module answers 500 on every request). B0139: a block declaration
+    /// with the name of an import hides it for the whole block, so a read meant for the import gets the local value.
+    fn block_declarations(&mut self, body: &[Stmt]) {
+        let mut seen: Vec<String> = Vec::new();
+        for s in body {
+            let mut names: Vec<&Ident> = Vec::new();
+            match s {
+                Stmt::Var(v) if v.kind != VarKind::Var => {
+                    for d in &v.decls {
+                        d.pat.bound_names(&mut names);
+                    }
+                }
+                Stmt::Func(f) => names.extend(f.name.iter()),
+                _ => continue,
+            }
+            for id in names {
+                if seen.contains(&id.name) {
+                    self.push("B0138", id.span, format!("`{}` is declared twice in the same block: the module will not load", id.name), format!("rename the second `{0}` (for example `{0}2`), or reuse the first with an assignment (declare it with `let`)", id.name));
+                    continue;
+                }
+                if self.scopes.lookup(&id.name) == Some(Kind::Import) {
+                    self.push("B0139", id.span, format!("this `{}` hides the import of the same name in the whole block", id.name), format!("rename the local (for example `{0}List`) so `{0}.…` still reaches the import", id.name));
+                }
+                seen.push(id.name.clone());
+            }
+        }
     }
 
     fn stmt(&mut self, s: &Stmt) {
@@ -1345,6 +1376,116 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// B0136: a top-level `fx` also runs while the page renders on the server. Calling `navigate()` there, or a
+    /// `server:` function (directly or through a local function), starts browser-only work during SSR: an awaited
+    /// failure nobody catches used to empty the whole response. `mounted()` and event handlers run only in the browser.
+    fn fx_runs_on_server(&mut self, script: &[Stmt]) {
+        let server: Vec<String> = script.iter().filter_map(|s| match s { Stmt::Server { func, .. } => func.name.as_ref().map(|n| n.name.clone()), _ => None }).collect();
+        let callees = |e: &Expr| {
+            let mut out: Vec<String> = Vec::new();
+            each_expr(e, &mut |x| {
+                if let Expr::Call { callee, .. } = x
+                    && let Expr::Ident(k) = callee.unparen()
+                    && !out.contains(&k.name)
+                {
+                    out.push(k.name.clone());
+                }
+            });
+            out
+        };
+        let browser_only = |n: &str| n == "navigate" || server.iter().any(|s| s == n);
+        // local helpers one level deep: `const load = async () => { list = await fetchList() }`
+        let mut helpers: Vec<(String, String)> = Vec::new();
+        for s in script {
+            let (name, calls) = match s {
+                Stmt::Var(v) => {
+                    let mut found = None;
+                    for d in &v.decls {
+                        if let (Pat::Ident(id), Some(init)) = (&d.pat, &d.init)
+                            && matches!(init.unparen(), Expr::Func(_))
+                        {
+                            found = Some((id.name.clone(), callees(init)));
+                        }
+                    }
+                    match found { Some(f) => f, None => continue }
+                }
+                Stmt::Func(f) => match &f.name {
+                    Some(n) => (n.name.clone(), callees(&Expr::Func(Box::new(f.clone())))),
+                    None => continue,
+                },
+                _ => continue,
+            };
+            if let Some(hit) = calls.iter().find(|c| browser_only(c.as_str())) {
+                helpers.push((name, hit.clone()));
+            }
+        }
+        for s in script {
+            let Stmt::Expr { expr, .. } = s else { continue };
+            let Expr::Call { callee, args, .. } = expr.unparen() else { continue };
+            if !matches!(callee.unparen(), Expr::Ident(k) if k.name == "fx") {
+                continue;
+            }
+            let Some(body) = args.first() else { continue };
+            let own = match body.unparen() { Expr::Func(f) => Some(f.span), _ => None };
+            let mut nested: Vec<Span> = Vec::new();
+            each_expr(body, &mut |x| if let Expr::Func(f) = x && Some(f.span) != own { nested.push(f.span) });
+            let mut hit: Option<(Span, String, Option<String>)> = None;
+            each_expr(body, &mut |x| {
+                if hit.is_some() { return }
+                let Expr::Call { callee, span, .. } = x else { return };
+                let Expr::Ident(k) = callee.unparen() else { return };
+                if nested.iter().any(|f| f.start <= span.start && span.end <= f.end) { return }
+                if browser_only(k.name.as_str()) {
+                    hit = Some((*span, k.name.clone(), None));
+                } else if let Some((_, inner)) = helpers.iter().find(|(n, _)| *n == k.name) {
+                    hit = Some((*span, k.name.clone(), Some(inner.clone())));
+                }
+            });
+            let Some((span, name, via)) = hit else { continue };
+            let what = match (&via, name.as_str()) {
+                (Some(inner), _) if inner == "navigate" => format!("`{name}()` calls `navigate()`"),
+                (Some(inner), _) => format!("`{name}()` calls the server function `{inner}()`"),
+                (None, "navigate") => "`navigate()`".to_string(),
+                (None, _) => format!("the server function `{name}()`"),
+            };
+            let fix = if name == "navigate" || via.as_deref() == Some("navigate") {
+                "move it to `mounted(() => { … })` or an event handler; to send the visitor elsewhere before the page renders, `throw redirect('/path')` in load()".to_string()
+            } else {
+                format!("start it from `mounted(() => {{ {name}() }})` or an event handler, inside try/catch; data the page needs at render time comes from load()")
+            };
+            self.push("B0136", span, format!("this `fx` also runs while the page renders on the server, and {what} there"), fix);
+        }
+    }
+
+    /// B0137: a view reads `props.x` but exports no `load()`, so `props` is `{}` on every request: `props.x` is
+    /// undefined and the first member read on it throws while the page renders. Layouts and `_error.brain` get their
+    /// props from the framework and are not views of their own. Reported once per file.
+    fn props_without_load(&mut self, e: &Expr) {
+        if self.c.level != Level::View || self.server_fns.contains("load") {
+            return;
+        }
+        let stem = self.c.file.rsplit('/').next().unwrap_or("");
+        if stem.starts_with('_') || self.diags.iter().any(|d| d.code == "B0137") {
+            return;
+        }
+        let Expr::Member { obj, prop: MemberProp::Name(p), span, .. } = e else { return };
+        let Expr::Ident(id) = obj.unparen() else { return };
+        if id.name != "props" || self.scopes.lookup("props") != Some(Kind::LoadProps) {
+            return;
+        }
+        let has_load_var = self.c.script.iter().any(|s| matches!(s, Stmt::Export { decl, .. } if matches!(decl.as_ref(), Stmt::Var(v) if v.decls.iter().any(|d| matches!(&d.pat, Pat::Ident(n) if n.name == "load")))));
+        if has_load_var {
+            return;
+        }
+        let name = &p.name;
+        self.push(
+            "B0137",
+            *span,
+            format!("`props.{name}` is read, but this view has no `load()`: `props` is empty on every request and the page fails while it renders"),
+            format!("add `export async function load(ctx) {{ return {{ {name}: … }} }}` to this view, or use a local value (`let {name} = sig(…)`) if the data does not come from the server"),
+        );
+    }
+
     /// B0133: `f.v = { … }` / `f.err = { … }` on a `form()`. Those objects hold the live fields the inputs are bound
     /// to; replacing them disconnects the form (the runtime throws, F10). Values load with `f.reset(values)`.
     fn form_replace(&mut self, e: &Expr) {
@@ -1395,6 +1536,7 @@ impl<'a> Checker<'a> {
     }
 
     fn expr(&mut self, e: &Expr) {
+        self.props_without_load(e);
         self.llm_client(e);
         self.location_nav(e);
         self.client_redirect(e);

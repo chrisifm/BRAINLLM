@@ -369,3 +369,59 @@ fn importing_what_a_module_does_not_export() {
         assert!(check(ok).is_empty(), "{ok}");
     }
 }
+
+#[test]
+fn fx_starting_browser_only_work_during_ssr() {
+    let b0136 = |src: &str| {
+        let c = brain_parse::parse(src, Path::new("comp/step.brain")).unwrap();
+        brain_check::check(&c, &Ctx::default()).into_iter().filter(|d| d.code == "B0136").collect::<Vec<_>>()
+    };
+    // B0136: navigate() and a server function inside a top-level fx run while the page renders on the server
+    for bad in [
+        "<script>\n  fx(() => { navigate('/next', { replace: true }) })\n</script>\n<p>hi</p>\n",
+        "<script>\n  server: async function save(ctx, x) { return x }\n  fx(() => { save({}) })\n</script>\n<p>hi</p>\n",
+        "<script>\n  let list = sig([])\n  server: async function fetchList(ctx) { return [] }\n  const refresh = async () => { list = await fetchList() }\n  fx(() => { refresh() })\n</script>\n<p>{list.length}</p>\n",
+    ] {
+        let d = b0136(bad);
+        assert_eq!(d.len(), 1, "{bad}: {d:?}");
+        assert!(d[0].fix.contains("mounted"), "{d:?}");
+    }
+    // mounted(), an event handler and a listener nested inside fx run only in the browser
+    for ok in [
+        "<script>\n  mounted(() => { navigate('/next') })\n</script>\n<p>hi</p>\n",
+        "<script>\n  server: async function save(ctx) { return 1 }\n</script>\n<button on:click={() => save()}>Save</button>\n",
+        "<script>\n  fx(() => { const go = () => navigate('/next'); addEventListener('popstate', go); return () => removeEventListener('popstate', go) })\n</script>\n<p>hi</p>\n",
+    ] {
+        assert!(b0136(ok).is_empty(), "{ok}: {:?}", b0136(ok));
+    }
+}
+
+#[test]
+fn view_reading_props_without_load() {
+    let b0137 = |path: &str, src: &str| {
+        let c = brain_parse::parse(src, Path::new(path)).unwrap();
+        brain_check::check(&c, &Ctx::default()).into_iter().filter(|d| d.code == "B0137").collect::<Vec<_>>()
+    };
+    // B0137: `props` is what load() returns; without load it is {} and `props.items.find` throws while rendering
+    let d = b0137("views/x.brain", "<ul>{#each props.items as i (i)}<li>{i}</li>{/each}</ul>\n<p>{props.title}</p>\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(d[0].fix.contains("export async function load"), "{d:?}");
+    // with load(), in a layout or the error page, and in a component: no warning
+    assert!(b0137("views/x.brain", "<script>\n  export async function load(ctx) { return { items: [] } }\n</script>\n<ul>{#each props.items as i (i)}<li>{i}</li>{/each}</ul>\n").is_empty());
+    assert!(b0137("views/_error.brain", "<p>{props.message} {props.rid}</p>\n").is_empty());
+    assert!(b0137("comp/card.brain", "<meta props=\"title:str\">\n<p>{title}</p>\n").is_empty());
+}
+
+#[test]
+fn declared_twice_or_hiding_an_import_in_load() {
+    let codes = |src: &str| {
+        let c = brain_parse::parse(src, Path::new("views/x.brain")).unwrap();
+        brain_check::check(&c, &Ctx::default()).into_iter().map(|d| d.code).filter(|c| *c == "B0138" || *c == "B0139").collect::<Vec<_>>()
+    };
+    // B0138: the emitted server module would throw SyntaxError and the route answers 500
+    assert_eq!(codes("<script>\n  export async function load() { const a = 1; const a = 2; return { a } }\n</script>\n<p>{props.a}</p>\n"), ["B0138"]);
+    // B0139: a local named like an import hides it in the whole block
+    assert_eq!(codes("<script>\n  import steps from '../server/steps.jsbrain'\n  export async function load() { const steps = steps.forRun(1); return { steps } }\n</script>\n<p>{props.steps}</p>\n"), ["B0139"]);
+    // separate blocks and a renamed local are fine
+    assert!(codes("<script>\n  import steps from '../server/steps.jsbrain'\n  export async function load() { const list = steps.forRun(1); if (list) { const a = 1 } else { const a = 2 } return { list } }\n</script>\n<p>{props.list}</p>\n").is_empty());
+}

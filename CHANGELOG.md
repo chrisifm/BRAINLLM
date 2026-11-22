@@ -9,6 +9,43 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.10.35] - 2026-11-21
+
+### Fixed
+
+- A promise nobody awaited or caught (an async call started inside `fx` while the page rendered on the server) no
+  longer ends the Node process and empties every response in flight: the server keeps a process-level sink, the
+  failure joins the page's component failures with `where: "promise"`, and after a render it is one structured log line.
+- `navigate()` is a no-op on the server, so an `fx` that navigates no longer breaks server rendering.
+- A page rendered per request gets its FAQPage when the `faq` group lives in a child component: the server reads the
+  rendered `<details>` groups and adds the JSON-LD unless the page already declares one.
+- `brain split` of a view turns `props.x` reads into props of the new component: the child reads `x` and the view
+  passes `x={props.x}`.
+- A `>` inside a `<meta seo>` expression (an arrow or nested braces in `jsonld={{ … }}`) no longer closes the tag
+  for the block-order check (a misleading B0125).
+- `redirect('/' + encodeURIComponent(a) + '/' + encodeURIComponent(b))` and its template form pass B0710: an encoded
+  piece right after the leading slash cannot turn the path into another host.
+- An `llms.txt` or `llms-full.txt` written in `public/` is the one published; the generated file no longer replaces it.
+- `stub('GET /data/x.json')` also matches a request for `/x.json` under `<meta http base="/data">`.
+
+### Added
+
+- B0136 (warning): a top-level `fx` that calls `navigate()` or a `server:` function, directly or through a local
+  helper, also runs during server rendering; the fix moves it to `mounted()` or an event handler.
+- B0137 (warning): a view reads `props.x` but has no `load()`, so `props` is empty on every request.
+- B0138 (error): the same `let`/`const`/`function` name twice in one block, which made the emitted module fail to
+  load (a view's server module answered 500 on every request).
+- B0139 (warning): a block declaration hides an import of the same name.
+- B0003 for `on:submit|preventDefault` names the missing feature and suggests calling `e.preventDefault()` in the
+  handler.
+- `seo.external` in brain.json: path prefixes another server answers on the same origin (an API behind nginx); links
+  under them are not checked against the build by the SEO audit or the static artifact audit.
+
+### Documentation
+
+- SPEC: a top-level `sig` bound to `<select>`, `<Select>` or `<Tabs>` is kept in the URL as `?ui.<hash>.<name>`, and
+  `data-url-state="off"` keeps it private; `stub()` and `<meta http base>`.
+
 ## [0.10.34] - 2026-11-21
 
 ### Fixed

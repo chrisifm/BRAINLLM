@@ -76,3 +76,11 @@ fn dynamic_import_names_the_construct_in_every_position() {
     // `import.meta` and static imports still parse.
     assert!(brain_parse::parse("<script>\nimport a from './a.jsbrain'\nconst e = import.meta.env.X\n</script><p>{a}{e}</p>", Path::new("comp/x.brain")).is_ok());
 }
+
+#[test]
+fn event_modifier_from_another_framework() {
+    let d = err("<script>\n  const send = () => {}\n</script>\n<form on:submit|preventDefault={send}><button>Go</button></form>\n");
+    assert_eq!(d.code, "B0003");
+    assert!(d.msg.contains("on:submit|preventDefault"), "{d}");
+    assert!(d.fix.contains("e.preventDefault()"), "{d}");
+}

@@ -36,6 +36,9 @@ fn row23_block_order() {
     // HTML <meta>/<script src> inside app.brain's <head> are markup.
     let app = "<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"></head><body><slot /></body></html>";
     assert!(!codes("app.brain", app).contains(&"B0125"), "{:?}", codes("app.brain", app));
+    // a `>` inside a `<meta seo>` expression (an arrow, nested braces) does not close the tag
+    let seo = "<meta seo title=\"Steps\" description=\"All the steps of a run.\" jsonld={{ '@type': 'ItemList', itemListElement: props.items.map((x, i) => ({ '@type': 'ListItem', position: i + 1, name: x.name })) }}>\n<script>\n  export async function load() { return { items: [] } }\n</script>\n<h1>Steps</h1>\n";
+    assert!(!codes("views/steps.brain", seo).contains(&"B0125"), "{:?}", codes("views/steps.brain", seo));
 }
 
 #[test]

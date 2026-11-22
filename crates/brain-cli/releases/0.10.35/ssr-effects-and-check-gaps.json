@@ -1,0 +1,35 @@
+{
+  "id": "ssr-effects-and-check-gaps",
+  "kind": "fix",
+  "title": "Server rendering survives effects, and check reports defects that only failed at runtime",
+  "why": "Apps returned an empty response (proxy 502) when an fx started a server call or navigate() during server rendering, and several defects passed check, doctor and build but failed only at runtime: a duplicate declaration in load(), a local hiding an import, view props without load().",
+  "changelog": [
+    "keeps a process-level sink",
+    "`navigate()` is a no-op on the server",
+    "gets its FAQPage when the `faq` group",
+    "`brain split` of a view",
+    "inside a `<meta seo>` expression",
+    "pass B0710",
+    "written in `public/` is the one published",
+    "also matches a request for",
+    "B0136 (warning)",
+    "B0137 (warning)",
+    "B0138 (error)",
+    "B0139 (warning)",
+    "B0003 for `on:submit|preventDefault`",
+    "`seo.external` in brain.json",
+    "SPEC: a top-level `sig` bound to"
+  ],
+  "guide": "SPEC.md",
+  "apis": [],
+  "affects": [
+    "**/*.brain",
+    "brain.json"
+  ],
+  "codes": [
+    "B0136",
+    "B0137",
+    "B0138",
+    "B0139"
+  ]
+}
