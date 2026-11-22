@@ -9,6 +9,13 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.10.41] - 2026-11-22
+
+### Fixed
+
+- `brain upgrade --apply` changes only the `@christianirack/brainllm` pin line in package.json: key order, indentation
+  and line endings stay as written (it used to sort every key and reformat the file).
+
 ## [0.10.40] - 2026-11-22
 
 0.10.37, 0.10.38 and 0.10.39 failed CI before publishing; their changes ship here.

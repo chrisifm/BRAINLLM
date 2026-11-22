@@ -215,7 +215,14 @@ pub fn preview(root: &Path, target: &str) -> Result<Value> {
         decisions.push("Confirm that the requested prerelease is appropriate for this app.".into());
     }
     let changed = pins.iter().any(|p| p["changed"] == true);
-    let content = if changed {
+    // Only the pin's value changes in the file the author wrote: key order, indentation and line endings stay. The
+    // edit is kept only when it parses to exactly the updated package; otherwise the whole file is reformatted.
+    let surgical = changed.then(|| pin_edit(source, &pins, target)).flatten()
+        .filter(|edited| serde_json::from_str::<Value>(edited).is_ok_and(|v| v == package));
+    let reformatted = changed && surgical.is_none();
+    let content = if let Some(edited) = surgical {
+        edited
+    } else if changed {
         format!(
             "{}\n",
             serde_json::to_string_pretty(&package).map_err(|e| e.to_string())?
@@ -226,7 +233,7 @@ pub fn preview(root: &Path, target: &str) -> Result<Value> {
     if content.len() as u64 > MAX_BYTES {
         return Err("formatted package.json would exceed 2 MiB".into());
     }
-    if changed {
+    if reformatted {
         warnings.push("package.json is formatted as two-space JSON; all other effective JSON values are preserved. Duplicate keys, if any, use standard JSON last-value semantics.".into());
     }
     decisions.push("Review release notes and supply an actual released compatibility baseline; this preview has not verified source compatibility or registry availability.".into());
@@ -246,6 +253,41 @@ pub fn preview(root: &Path, target: &str) -> Result<Value> {
         "requiredGates":["Review an explicit released contract with scripts/compatibility-check.mjs", "Install the pinned version with the app's reviewed package manager and review its lockfile", "brain check", "brain test", "brain build", "Run app tests and migration slices"],
         "frameworkContributionGates":["cargo test --workspace", "npm test --prefix runtime", "node bench/fixtures-check.mjs", "scripts/check-english.sh", "node bench/llm/gate.mjs when author contracts change"]
     }))
+}
+
+/// `source` with each changed pin's string value replaced in place: the `"<section>": {` object, then the package's
+/// `"@christianirack/brainllm": "<old>"` inside it. `None` when a pin cannot be found literally (escapes, comments).
+fn pin_edit(source: &str, pins: &[Value], target: &str) -> Option<String> {
+    let mut out = source.to_owned();
+    for pin in pins.iter().filter(|p| p["changed"] == true) {
+        let (section, old) = (pin["section"].as_str()?, pin["from"].as_str()?);
+        let at = find_key(&out, section, 0)?;
+        let open = at + out[at..].find('{')?;
+        let close = open + out[open..].find('}')?;
+        let key = find_key(&out[..close], PACKAGE, open)?;
+        let quote = key + out[key..close].find('"')?;
+        let value = format!("\"{old}\"");
+        if !out[quote..close].starts_with(&value) {
+            return None;
+        }
+        out.replace_range(quote..quote + value.len(), &format!("\"{target}\""));
+    }
+    Some(out)
+}
+
+/// Byte offset just after `"key"` and its colon, searching from `from`.
+fn find_key(text: &str, key: &str, from: usize) -> Option<usize> {
+    let quoted = format!("\"{key}\"");
+    let mut start = from;
+    while let Some(i) = text[start..].find(&quoted) {
+        let after = start + i + quoted.len();
+        let rest = text[after..].trim_start();
+        if let Some(r) = rest.strip_prefix(':') {
+            return Some(text.len() - r.len());
+        }
+        start = after;
+    }
+    None
 }
 
 #[cfg(test)]
@@ -341,6 +383,16 @@ mod tests {
                 .any(|v| v.as_str().unwrap().contains("breaking"))
         );
     }
+    #[test]
+    fn a_changed_pin_keeps_key_order_and_formatting() {
+        let original = "{\n  \"name\": \"app\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": { \"dev\": \"brain run\", \"build\": \"brain build\" },\n  \"dependencies\": {\n    \"@christianirack/brainllm\": \"0.10.36\"\n  }\n}\n";
+        let app = App::new(original);
+        let result = preview(&app.0, "0.10.40").unwrap();
+        let content = result["operations"][0]["content"].as_str().unwrap();
+        assert_eq!(content, original.replace("0.10.36", "0.10.40"));
+        assert!(!result["warnings"].to_string().contains("two-space JSON"), "{result}");
+    }
+
     #[test]
     fn unchanged_pin_is_noop_and_missing_or_invalid_dependency_is_not_invented() {
         let app = App::new(r#"{"dependencies":{"@christianirack/brainllm":"1.2.3"}}"#);

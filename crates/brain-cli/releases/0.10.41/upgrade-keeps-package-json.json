@@ -1,0 +1,15 @@
+{
+  "id": "upgrade-keeps-package-json",
+  "kind": "fix",
+  "title": "brain upgrade --apply changes only the framework pin in package.json",
+  "why": "Upgrading rewrote package.json with every key sorted, so a one-line version bump showed as a 14-line diff and moved the app's own key order.",
+  "changelog": [
+    "changes only the `@christianirack/brainllm` pin line"
+  ],
+  "guide": "SPEC.md",
+  "apis": [],
+  "affects": [
+    "package.json"
+  ],
+  "codes": []
+}
