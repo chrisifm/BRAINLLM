@@ -2,9 +2,7 @@
 // Same-origin POST with an anti-CSRF header; returns the response JSON. A failure (network or status ≥400) is reported
 // to the catcher and rethrown to the caller; 422 (validation, `{ errors: { field: msg } }` that form() marks) is
 // expected, not reported. It never imports the core (that would be a hash cycle): the core hands it `oops` and the base.
-// While server.mjs renders a page (`__brainServer`) a call is a no-op: it stays pending, nothing after it runs.
 export async function rpc(id, a, oops, base) {
-  if (globalThis.__brainServer) return new Promise(() => {})
   let r, j
   try {
     r = await fetch(base + '_r/' + id, { method: 'POST', headers: { 'content-type': 'application/json', 'x-brain-rpc': '1' }, body: JSON.stringify(a) })

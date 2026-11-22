@@ -170,23 +170,21 @@ test('a faq group inside a child component of a page rendered per request gets i
   assert.equal(data.mainEntity[0].acceptedAnswer.text, 'Yes, for ten people.')
 })
 
-test('a server function an fx calls while the page renders on the server is a no-op: no fetch, no failure', async () => {
+test('a server function an fx calls while the page renders on the server is a no-op: no failure, nothing after it runs', async () => {
   logs.length = 0
-  const real = globalThis.fetch, seen = []
-  globalThis.fetch = (u, init) => (seen.push(String(u)), real(u, init))
-  let r, html
-  try {
-    r = await fetch(base + '/rpcfx', { headers: { 'x-request-id': 'req-rpc' } })
-    html = await r.text()
-    await new Promise(done => setTimeout(done, 20))
-  } finally {
-    globalThis.fetch = real
-  }
+  const r = await fetch(base + '/rpcfx', { headers: { 'x-request-id': 'req-rpc' } })
+  const html = await r.text()
+  await new Promise(done => setTimeout(done, 20))
   assert.equal(r.status, 200)
   assert.match(html, /<p class="rpc">kept<\/p>/)
-  assert.deepEqual(seen.filter(u => u.includes('_r/')), [])
   assert.equal(globalThis.__rpcResolved, undefined)
-  assert.deepEqual(logs.filter(l => l.rid === 'req-rpc' && l.level === 'error'), [])
+  assert.deepEqual(logs.filter(l => l.level === 'error'), [])
+  // the server process's fetch: that relative stub shape stays pending, absolute URLs still go out
+  let settled = false
+  fetch('/_r/k3x9/list', { method: 'POST' }).then(() => (settled = true), () => (settled = true))
+  await new Promise(done => setTimeout(done, 20))
+  assert.equal(settled, false)
+  assert.equal((await fetch(base + '/rpcfx')).status, 200)
 })
 
 test('jsonld nodes rendered per request get "@context" when the view left it out', async () => {

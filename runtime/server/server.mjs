@@ -1131,9 +1131,15 @@ export function createServer(o = {}) {
     }
     return out
   }
-  // Server-function stubs called while a page renders here (an fx, a helper) never leave the process: brain-rpc.js
-  // returns a promise that stays pending, so the call is a no-op instead of fetch() with a relative URL
-  globalThis.__brainServer = true
+  // A server-function stub called while a page renders here (an fx, a helper) posts to a relative `/_r/<hash>/<fn>`,
+  // which Node's fetch rejects (ERR_INVALID_URL). That one shape stays pending instead: the call is a no-op and nothing
+  // after it runs. Every other fetch (absolute URLs, app server code) is untouched; the browser runtime does not grow.
+  if (!globalThis.fetch.$brain) {
+    const real = globalThis.fetch
+    globalThis.fetch = Object.assign(function fetch(u, init) {
+      return typeof u === 'string' && /^\/(?:[^/?#]*\/)*_r\//.test(u) ? new Promise(() => {}) : real.call(this, u, init)
+    }, { $brain: true })
+  }
   const dropRejections = ownRejections(e => {
     const into = globalThis.__brainSSR
     if (into) return void into.push({ e, w: 'promise', comp: null })
