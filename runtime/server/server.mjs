@@ -1820,7 +1820,6 @@ export function createServer(o = {}) {
     globalThis.__brainRoute = at // route(): app path, params, query of this request
     globalThis.__brainBase = BASE !== '/' ? BASE : null // computed href/src get the base (brain.js attr)
     const failed = (globalThis.__brainSSR = []) // components that fell back (brain-guard, §42): logged by ssr()
-    globalThis.__brainRid = rid // a boundary's fallback names this request, so a user report finds the log line
     let stop
     // #285: with `adopt` in the manifest (codegen navigates with fc/nx), the HTML is stamped so islands resume on it
     const unstamp = mf.adopt && core._rt ? (await load('_server/brain-hydrate.js')).stamp(core._rt()) : null
@@ -1832,9 +1831,12 @@ export function createServer(o = {}) {
     }
     await new Promise(r => setTimeout(r, 0))
     globalThis.__brainSSR = null
-    globalThis.__brainRid = null
     fillValues(root)
-    const body = localizeLinks(route, root.innerHTML)
+    // A boundary's fallback names this request (and the error's code when only one component failed), small and in
+    // data- attributes, so a user report finds the server log line. Added here, not in brain-guard: every page loads it.
+    const one = failed.length === 1 && typeof failed[0].e?.code === 'string' && /^[A-Z][A-Z0-9_]{1,40}$/.test(failed[0].e.code) ? failed[0].e.code : null
+    const body = localizeLinks(route, failed.length && rid ? root.innerHTML.replace(/<div role="alert" class="brain-fallback">([^<]*)/g, (_, text) =>
+      `<div role="alert" class="brain-fallback"${one ? ` data-code="${one}"` : ''} data-rid="${esc(rid)}">${text.trimEnd()} <small class="brain-ref">${one ? one + ' · ' : ''}${esc(rid)}</small>${text.endsWith(' ') ? ' ' : ''}`) : root.innerHTML)
     stop()
     // SEO head: the codegen emits `export const seo` / `head` in the view's server module; the client chunk's V.seo
     // (older builds) is the fallback. Still inside the page's locale: `<meta seo title={t('…')}>` is translated.

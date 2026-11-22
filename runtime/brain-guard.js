@@ -140,24 +140,12 @@ export function guard(C, fb, budget, label) {
   const W = $p => {
     const own = I.owner(), end = G.document.createComment('')
     let nodes = [], dispose = null, fails = []
-    const notice = (retry, text, e) => {
+    const notice = (retry, text) => {
       if (typeof fb === 'function' && !text) return I.nodes(fb())
       const box = G.document.createElement('div')
       box.setAttribute('role', 'alert')
       box.setAttribute('class', 'brain-fallback')
       box.textContent = text || fb || TEXT
-      // what a user report needs to find the server log line: the error's code and, rendered on the server, the
-      // request id (server.mjs sets __brainRid while the page renders); shown small, and as data- attributes
-      const code = e && typeof e.code == 'string' && /^[A-Z][A-Z0-9_]{1,40}$/.test(e.code) ? e.code : null, rid = G.__brainSSR && G.__brainRid
-      if (code) box.setAttribute('data-code', code)
-      if (rid) {
-        box.setAttribute('data-rid', rid)
-        const s = G.document.createElement('small')
-        s.setAttribute('class', 'brain-ref')
-        s.textContent = (code ? code + ' · ' : '') + rid
-        box.appendChild(G.document.createTextNode(' '))
-        box.appendChild(s)
-      }
       if (retry) {
         const b = G.document.createElement('button')
         b.setAttribute('type', 'button')
@@ -179,7 +167,7 @@ export function guard(C, fb, budget, label) {
       if (dispose) dispose(), (dispose = null) // stops its fx, drv and handlers
       const p = end.parentNode
       I.rm(nodes)
-      nodes = notice(!text && fails.length < LIMIT, text, e)
+      nodes = notice(!text && fails.length < LIMIT, text)
       if (p) for (const n of nodes) p.insertBefore(n, end)
       report(e, w)
     }
@@ -227,7 +215,7 @@ export function guard(C, fb, budget, label) {
           dispose = null
           const now = Date.now()
           fails = [...fails.filter(t => now - t < WINDOW), now]
-          nodes = notice(fails.length < LIMIT, undefined, pending[0])
+          nodes = notice(fails.length < LIMIT)
           report(pending[0], pending[1])
           pending = null
         }
