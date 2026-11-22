@@ -9,6 +9,13 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.10.42] - 2026-11-22
+
+### Fixed
+
+- `class={c ? 'card is-cur' : 'card'}` normalizes to `class="card" class:is-cur={c}`: a class in both branches of the
+  ternary stays static instead of becoming two `class:card` toggles, which reported a misleading B0209.
+
 ## [0.10.41] - 2026-11-22
 
 ### Fixed

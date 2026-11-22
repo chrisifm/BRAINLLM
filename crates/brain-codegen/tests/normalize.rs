@@ -156,3 +156,13 @@ fn inline_event_string_is_reported_and_custom_elements_keep_their_attributes() {
     assert_eq!((lit.line, lit.level), (5, Severity::Warning), "{lit:#?}");
     assert!(!o.warnings.iter().any(|d| d.code == "B0223"), "{:#?}", o.warnings);
 }
+
+#[test]
+fn a_class_in_both_branches_of_a_class_ternary_stays_static() {
+    // `class={c ? 'card is-cur' : 'card'}`: `card` is always present; two `class:card` toggles were reported as B0209
+    let src = "<script>\nimport { sig } from 'brain'\nlet items = sig([])\n</script>\n<ul>{#each items as v (v.id)}<li class={v.curated ? 'card is-cur' : 'card'}>{v.name}</li>{/each}</ul>";
+    let o = brain_codegen::compile(src, Path::new("comp/cards.brain")).unwrap_or_else(|d| panic!("{d:#?}"));
+    let fix = o.warnings.iter().find(|d| d.code == "B0212").expect("normalized");
+    assert!(fix.fix.contains("class=\"card\" class:is-cur={v.curated}") && !fix.fix.contains("class:card"), "{}", fix.fix);
+    assert!(!o.warnings.iter().any(|d| d.code == "B0209"), "{:#?}", o.warnings);
+}

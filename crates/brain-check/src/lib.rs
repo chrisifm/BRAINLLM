@@ -2062,10 +2062,15 @@ impl<'a> Checker<'a> {
                         return;
                     }
                     let t = self.text(test.span()).to_string();
-                    for c in on.split_whitespace() {
+                    // a class in both branches is always present: static, not two toggles of the same name (B0209)
+                    let (on, off): (Vec<&str>, Vec<&str>) = (on.split_whitespace().collect(), off.split_whitespace().collect());
+                    for c in on.iter().filter(|c| off.contains(c)) {
+                        fixed.push(c.to_string());
+                    }
+                    for c in on.iter().filter(|c| !off.contains(c)) {
                         toggles.push((c.to_string(), t.clone()));
                     }
-                    for c in off.split_whitespace() {
+                    for c in off.iter().filter(|c| !on.contains(c)) {
                         toggles.push((c.to_string(), format!("!({t})")));
                     }
                 }

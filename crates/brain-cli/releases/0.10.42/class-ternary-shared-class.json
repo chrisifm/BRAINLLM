@@ -1,0 +1,15 @@
+{
+  "id": "class-ternary-shared-class",
+  "kind": "fix",
+  "title": "A class in both branches of a class ternary stays static",
+  "why": "class={c ? 'card is-cur' : 'card'} failed with a misleading B0209 duplicate attribute, because the normalization turned the shared class into two class: toggles.",
+  "changelog": [
+    "normalizes to `class=\"card\" class:is-cur={c}`"
+  ],
+  "guide": "SPEC.md",
+  "apis": [],
+  "affects": [
+    "**/*.brain"
+  ],
+  "codes": ["B0212"]
+}
